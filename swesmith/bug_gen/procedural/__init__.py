@@ -9,8 +9,10 @@ respective subdirectories (e.g., python/, javascript/, java/).
 # For backward compatibility, expose Python-specific classes
 from swesmith.bug_gen.procedural.golang import MODIFIERS_GOLANG
 from swesmith.bug_gen.procedural.python import MODIFIERS_PYTHON
+from swesmith.bug_gen.procedural.javascript import MODIFIERS_JAVASCRIPT
 
 MAP_EXT_TO_MODIFIERS = {
     ".go": MODIFIERS_GOLANG,
     ".py": MODIFIERS_PYTHON,
+    ".js": MODIFIERS_JAVASCRIPT,
 }
