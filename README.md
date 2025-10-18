@@ -104,3 +104,5 @@ MIT. Check `LICENSE` for more information.
   &nbsp;&nbsp;
   <a href="https://github.com/SWE-bench/sb-cli"><img src="docs/assets/sbcli_logo_text_below.svg" alt="sb-cli" height="120px"></a>
 </div>
+
+<!-- Test verification comment -->
