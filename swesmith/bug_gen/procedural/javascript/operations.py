@@ -18,7 +18,6 @@ class LogicBugModifier(JavaScriptProceduralModifier):
         """Create logic bugs using safe regex patterns."""
         modified_code = code
 
-        # Safe replacements that create logic bugs, not syntax errors
         logic_replacements = [
             # Comparison operators - use word boundaries
             (r"\b==\b", "!="),
