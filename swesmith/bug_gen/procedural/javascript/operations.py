@@ -21,30 +21,26 @@ class LogicBugModifier(JavaScriptProceduralModifier):
         # Safe replacements that create logic bugs, not syntax errors
         logic_replacements = [
             # Comparison operators - use word boundaries
-            (r'\b==\b', '!='),
-            (r'\b!=\b', '=='),
-            (r'\b===\b', '!=='),
-            (r'\b!==\b', '==='),
-
+            (r"\b==\b", "!="),
+            (r"\b!=\b", "=="),
+            (r"\b===\b", "!=="),
+            (r"\b!==\b", "==="),
             # Math function calls - only replace when they're function calls
-            (r'\bMath\.max\b', 'Math.min'),
-            (r'\bMath\.min\b', 'Math.max'),
-            (r'\bMath\.floor\b', 'Math.ceil'),
-            (r'\bMath\.ceil\b', 'Math.floor'),
-
+            (r"\bMath\.max\b", "Math.min"),
+            (r"\bMath\.min\b", "Math.max"),
+            (r"\bMath\.floor\b", "Math.ceil"),
+            (r"\bMath\.ceil\b", "Math.floor"),
             # String method calls - only replace when they're method calls
-            (r'\.toUpperCase\(\)', '.toLowerCase()'),
-            (r'\.toLowerCase\(\)', '.toUpperCase()'),
-
+            (r"\.toUpperCase\(\)", ".toLowerCase()"),
+            (r"\.toLowerCase\(\)", ".toUpperCase()"),
             # Boolean constants - use word boundaries
-            (r'\btrue\b', 'false'),
-            (r'\bfalse\b', 'true'),
-
+            (r"\btrue\b", "false"),
+            (r"\bfalse\b", "true"),
             # Numeric constants that create logic bugs
-            (r'\b0\b', '1'),
-            (r'\b1\b', '0'),
-            (r'\b100\b', '110'),
-            (r'\b200\b', '220'),
+            (r"\b0\b", "1"),
+            (r"\b1\b", "0"),
+            (r"\b100\b", "110"),
+            (r"\b200\b", "220"),
         ]
 
         # Apply one random replacement
@@ -54,4 +50,3 @@ class LogicBugModifier(JavaScriptProceduralModifier):
                 break
 
         return modified_code
-

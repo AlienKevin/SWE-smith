@@ -14,7 +14,7 @@ class JavaScriptProceduralModifier(ProceduralModifier, ABC):
         # Simple string-based modification for JavaScript
         # In a real implementation, you'd use a proper JavaScript AST parser
         modified_code = self._apply_modification(code_entity.src_code)
-        
+
         if modified_code == code_entity.src_code:
             return None
 
