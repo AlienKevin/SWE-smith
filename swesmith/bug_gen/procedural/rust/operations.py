@@ -7,6 +7,27 @@ from tree_sitter import Language, Parser
 
 RUST_LANGUAGE = Language(tsrs.language())
 
+ALL_BINARY_OPERATORS = [
+    "+",
+    "-",
+    "*",
+    "/",
+    "%",
+    "<<",
+    ">>",
+    "&",
+    "|",
+    "^",
+    "==",
+    "!=",
+    "<",
+    "<=",
+    ">",
+    ">=",
+    "&&",
+    "||",
+]
+
 FLIPPED_OPERATORS = {
     "+": "-",
     "-": "+",
@@ -138,15 +159,26 @@ class OperationFlipOperatorModifier(RustProceduralModifier):
         def collect_binary_ops(n):
             if n.type == "binary_expression":
                 operator_node = None
-                for child in n.children:
+                left_operand = None
+
+                for i, child in enumerate(n.children):
                     if child.type in FLIPPED_OPERATORS:
                         operator_node = child
+                        if i > 0:
+                            left_operand = n.children[0]
                         break
 
                 if operator_node and self.flip():
                     op = operator_node.text.decode("utf-8")
                     if op in FLIPPED_OPERATORS:
-                        modifications.append((operator_node, FLIPPED_OPERATORS[op]))
+                        if (
+                            op == "*"
+                            and left_operand
+                            and left_operand.type == "range_expression"
+                        ):
+                            pass  # Skip this - it's a dereference, not multiplication
+                        else:
+                            modifications.append((operator_node, FLIPPED_OPERATORS[op]))
 
             for child in n.children:
                 collect_binary_ops(child)
