@@ -55,6 +55,27 @@ BITWISE_OPS = ["&", "|", "^", "<<", ">>"]
 COMPARISON_OPS = ["==", "!=", "<", "<=", ">", ">="]
 LOGICAL_OPS = ["&&", "||"]
 
+ALL_BINARY_OPERATORS = [
+    "+",
+    "-",
+    "*",
+    "/",
+    "%",
+    "<<",
+    ">>",
+    "&",
+    "|",
+    "^",
+    "==",
+    "!=",
+    "<",
+    "<=",
+    ">",
+    ">=",
+    "&&",
+    "||",
+]
+
 
 class OperationChangeModifier(RustProceduralModifier):
     explanation: str = CommonPMs.OPERATION_CHANGE.explanation
