@@ -67,26 +67,7 @@ class OperationChangeModifier(RustProceduralModifier):
             if n.type == "binary_expression":
                 operator_node = None
                 for child in n.children:
-                    if child.type in [
-                        "+",
-                        "-",
-                        "*",
-                        "/",
-                        "%",
-                        "<<",
-                        ">>",
-                        "&",
-                        "|",
-                        "^",
-                        "==",
-                        "!=",
-                        "<",
-                        "<=",
-                        ">",
-                        ">=",
-                        "&&",
-                        "||",
-                    ]:
+                    if child.type in ALL_BINARY_OPERATORS:
                         operator_node = child
                         break
 
@@ -221,26 +202,7 @@ class OperationSwapOperandsModifier(RustProceduralModifier):
                     right_operand = None
 
                     for i, child in enumerate(n.children[1:], 1):
-                        if child.type in [
-                            "+",
-                            "-",
-                            "*",
-                            "/",
-                            "%",
-                            "<<",
-                            ">>",
-                            "&",
-                            "|",
-                            "^",
-                            "==",
-                            "!=",
-                            "<",
-                            "<=",
-                            ">",
-                            ">=",
-                            "&&",
-                            "||",
-                        ]:
+                        if child.type in ALL_BINARY_OPERATORS:
                             operator = child
                             if i + 1 < len(n.children):
                                 right_operand = n.children[i + 1]
@@ -307,26 +269,7 @@ class OperationBreakChainsModifier(RustProceduralModifier):
                 right_operand = None
 
                 for i, child in enumerate(n.children[1:], 1):
-                    if child.type not in [
-                        "+",
-                        "-",
-                        "*",
-                        "/",
-                        "%",
-                        "<<",
-                        ">>",
-                        "&",
-                        "|",
-                        "^",
-                        "==",
-                        "!=",
-                        "<",
-                        "<=",
-                        ">",
-                        ">=",
-                        "&&",
-                        "||",
-                    ]:
+                    if child.type not in ALL_BINARY_OPERATORS:
                         right_operand = child
                         break
 
@@ -339,26 +282,7 @@ class OperationBreakChainsModifier(RustProceduralModifier):
                 elif right_operand and right_operand.type == "binary_expression":
                     inner_right = None
                     for child in reversed(right_operand.children):
-                        if child.type not in [
-                            "+",
-                            "-",
-                            "*",
-                            "/",
-                            "%",
-                            "<<",
-                            ">>",
-                            "&",
-                            "|",
-                            "^",
-                            "==",
-                            "!=",
-                            "<",
-                            "<=",
-                            ">",
-                            ">=",
-                            "&&",
-                            "||",
-                        ]:
+                        if child.type not in ALL_BINARY_OPERATORS:
                             inner_right = child
                             break
                     if inner_right:
