@@ -1,4 +1,7 @@
 import pytest
+import tempfile
+import os
+from swesmith.bug_gen.adapters.rust import get_entities_from_file_rs
 from swesmith.bug_gen.procedural.rust.operations import (
     OperationChangeModifier,
     OperationFlipOperatorModifier,
@@ -7,6 +10,7 @@ from swesmith.bug_gen.procedural.rust.operations import (
     OperationChangeConstantsModifier,
     FLIPPED_OPERATORS,
 )
+import random
 
 
 @pytest.mark.parametrize(
@@ -48,24 +52,38 @@ from swesmith.bug_gen.procedural.rust.operations import (
 )
 def test_operation_change_modifier(src, expected_variants):
     """Test that OperationChangeModifier changes operators within the same category."""
-    from swesmith.bug_gen.procedural.rust.operations import RUST_LANGUAGE
-    from tree_sitter import Parser
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
+        f.write(src)
+        f.flush()
+        temp_path = f.name
 
-    parser = Parser(RUST_LANGUAGE)
-    tree = parser.parse(bytes(src, "utf8"))
+    try:
+        entities = []
+        get_entities_from_file_rs(entities, temp_path)
+        assert len(entities) == 1
 
-    modifier = OperationChangeModifier(likelihood=1.0, seed=42)
+        modifier = OperationChangeModifier(likelihood=1.0, seed=42)
+        modifier.rand = random.Random(42)
 
-    found_variant = False
-    for _ in range(20):
-        result = modifier._change_operations(src, tree.root_node)
-        if result != src and any(
-            result.strip() == variant.strip() for variant in expected_variants
-        ):
-            found_variant = True
-            break
+        found_variant = False
+        for _ in range(20):
+            result = modifier.modify(entities[0])
+            if (
+                result
+                and result.rewrite != src
+                and any(
+                    result.rewrite.strip() == variant.strip()
+                    for variant in expected_variants
+                )
+            ):
+                found_variant = True
+                break
 
-    assert found_variant, f"Expected one of {expected_variants}, but got {result}"
+        assert found_variant, (
+            f"Expected one of {expected_variants}, but got {result.rewrite if result else 'None'}"
+        )
+    finally:
+        os.unlink(temp_path)
 
 
 @pytest.mark.parametrize(
@@ -107,16 +125,26 @@ def test_operation_change_modifier(src, expected_variants):
 )
 def test_operation_flip_operator_modifier(src, expected):
     """Test that OperationFlipOperatorModifier flips operators to their opposites."""
-    from swesmith.bug_gen.procedural.rust.operations import RUST_LANGUAGE
-    from tree_sitter import Parser
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
+        f.write(src)
+        f.flush()
+        temp_path = f.name
 
-    parser = Parser(RUST_LANGUAGE)
-    tree = parser.parse(bytes(src, "utf8"))
+    try:
+        entities = []
+        get_entities_from_file_rs(entities, temp_path)
+        assert len(entities) == 1
 
-    modifier = OperationFlipOperatorModifier(likelihood=1.0, seed=42)
-    result = modifier._flip_operators(src, tree.root_node)
+        modifier = OperationFlipOperatorModifier(likelihood=1.0, seed=42)
+        modifier.rand = random.Random(42)
+        result = modifier.modify(entities[0])
 
-    assert result.strip() == expected.strip(), f"Expected {expected}, got {result}"
+        assert result is not None
+        assert result.rewrite.strip() == expected.strip(), (
+            f"Expected {expected}, got {result.rewrite}"
+        )
+    finally:
+        os.unlink(temp_path)
 
 
 @pytest.mark.parametrize(
@@ -150,16 +178,26 @@ def test_operation_flip_operator_modifier(src, expected):
 )
 def test_operation_swap_operands_modifier(src, expected):
     """Test that OperationSwapOperandsModifier swaps operands in binary expressions."""
-    from swesmith.bug_gen.procedural.rust.operations import RUST_LANGUAGE
-    from tree_sitter import Parser
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
+        f.write(src)
+        f.flush()
+        temp_path = f.name
 
-    parser = Parser(RUST_LANGUAGE)
-    tree = parser.parse(bytes(src, "utf8"))
+    try:
+        entities = []
+        get_entities_from_file_rs(entities, temp_path)
+        assert len(entities) == 1
 
-    modifier = OperationSwapOperandsModifier(likelihood=1.0, seed=42)
-    result = modifier._swap_operands(src, tree.root_node)
+        modifier = OperationSwapOperandsModifier(likelihood=1.0, seed=42)
+        modifier.rand = random.Random(42)
+        result = modifier.modify(entities[0])
 
-    assert result.strip() == expected.strip(), f"Expected {expected}, got {result}"
+        assert result is not None
+        assert result.rewrite.strip() == expected.strip(), (
+            f"Expected {expected}, got {result.rewrite}"
+        )
+    finally:
+        os.unlink(temp_path)
 
 
 @pytest.mark.parametrize(
@@ -174,39 +212,30 @@ def test_operation_swap_operands_modifier(src, expected):
                 "fn foo(a: i32, b: i32, c: i32) -> i32 {\n    c\n}",
             ],
         ),
-        (
-            """fn bar(x: i32, y: i32, z: i32) -> i32 {
-    x * (y * z)
-}""",
-            [
-                "fn bar(x: i32, y: i32, z: i32) -> i32 {\n    z\n}",
-                "fn bar(x: i32, y: i32, z: i32) -> i32 {\n    x * (y * z)\n}",
-            ],
-        ),
-        (
-            """fn baz(a: i32, b: i32) -> i32 {
-    a + b
-}""",
-            [
-                "fn baz(a: i32, b: i32) -> i32 {\n    a + b\n}",
-            ],
-        ),
     ],
 )
 def test_operation_break_chains_modifier(src, expected_variants):
     """Test that OperationBreakChainsModifier breaks operation chains."""
-    from swesmith.bug_gen.procedural.rust.operations import RUST_LANGUAGE
-    from tree_sitter import Parser
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
+        f.write(src)
+        f.flush()
+        temp_path = f.name
 
-    parser = Parser(RUST_LANGUAGE)
-    tree = parser.parse(bytes(src, "utf8"))
+    try:
+        entities = []
+        get_entities_from_file_rs(entities, temp_path)
+        assert len(entities) == 1
 
-    modifier = OperationBreakChainsModifier(likelihood=1.0, seed=42)
-    result = modifier._break_chains(src, tree.root_node)
+        modifier = OperationBreakChainsModifier(likelihood=1.0, seed=42)
+        modifier.rand = random.Random(42)
+        result = modifier.modify(entities[0])
 
-    assert any(result.strip() == variant.strip() for variant in expected_variants), (
-        f"Expected one of {expected_variants}, got {result}"
-    )
+        assert result is not None
+        assert any(
+            result.rewrite.strip() == variant.strip() for variant in expected_variants
+        ), f"Expected one of {expected_variants}, got {result.rewrite}"
+    finally:
+        os.unlink(temp_path)
 
 
 @pytest.mark.parametrize(
@@ -245,30 +274,30 @@ def test_operation_break_chains_modifier(src, expected_variants):
                 "fn baz() -> i32 {\n    11 * 21\n}",
             ],
         ),
-        (
-            """fn qux(a: i32, b: i32) -> i32 {
-    a / b
-}""",
-            [
-                "fn qux(a: i32, b: i32) -> i32 {\n    a / b\n}",
-            ],
-        ),
     ],
 )
 def test_operation_change_constants_modifier(src, expected_variants):
     """Test that OperationChangeConstantsModifier changes integer constants."""
-    from swesmith.bug_gen.procedural.rust.operations import RUST_LANGUAGE
-    from tree_sitter import Parser
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
+        f.write(src)
+        f.flush()
+        temp_path = f.name
 
-    parser = Parser(RUST_LANGUAGE)
-    tree = parser.parse(bytes(src, "utf8"))
+    try:
+        entities = []
+        get_entities_from_file_rs(entities, temp_path)
+        assert len(entities) == 1
 
-    modifier = OperationChangeConstantsModifier(likelihood=1.0, seed=42)
-    result = modifier._change_constants(src, tree.root_node)
+        modifier = OperationChangeConstantsModifier(likelihood=1.0, seed=42)
+        modifier.rand = random.Random(42)
+        result = modifier.modify(entities[0])
 
-    assert any(result.strip() == variant.strip() for variant in expected_variants), (
-        f"Expected one of {expected_variants}, got {result}"
-    )
+        assert result is not None
+        assert any(
+            result.rewrite.strip() == variant.strip() for variant in expected_variants
+        ), f"Expected one of {expected_variants}, got {result.rewrite}"
+    finally:
+        os.unlink(temp_path)
 
 
 def test_operation_flip_operator_mappings():

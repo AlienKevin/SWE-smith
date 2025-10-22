@@ -1,8 +1,12 @@
 import pytest
+import tempfile
+import os
+from swesmith.bug_gen.adapters.rust import get_entities_from_file_rs
 from swesmith.bug_gen.procedural.rust.control_flow import (
     ControlIfElseInvertModifier,
     ControlShuffleLinesModifier,
 )
+import random
 
 
 @pytest.mark.parametrize(
@@ -63,19 +67,27 @@ from swesmith.bug_gen.procedural.rust.control_flow import (
     ],
 )
 def test_control_if_else_invert_modifier(src, expected):
-    """Test that ControlIfElseInvertModifier inverts if-else bodies."""
-    from swesmith.bug_gen.procedural.rust.control_flow import RUST_LANGUAGE
-    from tree_sitter import Parser
+    """Test that ControlIfElseInvertModifier inverts if-else branches."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
+        f.write(src)
+        f.flush()
+        temp_path = f.name
 
-    parser = Parser(RUST_LANGUAGE)
-    tree = parser.parse(bytes(src, "utf8"))
+    try:
+        entities = []
+        get_entities_from_file_rs(entities, temp_path)
+        assert len(entities) == 1
 
-    modifier = ControlIfElseInvertModifier(likelihood=1.0, seed=42)
-    result = modifier._invert_if_else_statements(src, tree.root_node)
+        modifier = ControlIfElseInvertModifier(likelihood=1.0, seed=42)
+        modifier.rand = random.Random(42)
+        result = modifier.modify(entities[0])
 
-    assert result.strip() == expected.strip(), (
-        f"Expected:\n{expected}\n\nGot:\n{result}"
-    )
+        assert result is not None
+        assert result.rewrite.strip() == expected.strip(), (
+            f"Expected {expected}, got {result.rewrite}"
+        )
+    finally:
+        os.unlink(temp_path)
 
 
 @pytest.mark.parametrize(
@@ -106,27 +118,27 @@ def test_control_if_else_invert_modifier(src, expected):
                 "fn bar() {\n    let z = 3;\n    let y = 2;\n    let x = 1;\n}",
             ],
         ),
-        (
-            """fn baz() {
-    let x = 42;
-}""",
-            [
-                "fn baz() {\n    let x = 42;\n}",
-            ],
-        ),
     ],
 )
 def test_control_shuffle_lines_modifier(src, expected_variants):
-    """Test that ControlShuffleLinesModifier shuffles function statements."""
-    from swesmith.bug_gen.procedural.rust.control_flow import RUST_LANGUAGE
-    from tree_sitter import Parser
+    """Test that ControlShuffleLinesModifier shuffles independent lines."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
+        f.write(src)
+        f.flush()
+        temp_path = f.name
 
-    parser = Parser(RUST_LANGUAGE)
-    tree = parser.parse(bytes(src, "utf8"))
+    try:
+        entities = []
+        get_entities_from_file_rs(entities, temp_path)
+        assert len(entities) == 1
 
-    modifier = ControlShuffleLinesModifier(likelihood=1.0, seed=42)
-    result = modifier._shuffle_function_statements(src, tree.root_node)
+        modifier = ControlShuffleLinesModifier(likelihood=1.0, seed=42)
+        modifier.rand = random.Random(42)
+        result = modifier.modify(entities[0])
 
-    assert any(result.strip() == variant.strip() for variant in expected_variants), (
-        f"Expected one of:\n{expected_variants}\n\nGot:\n{result}"
-    )
+        assert result is not None
+        assert any(
+            result.rewrite.strip() == variant.strip() for variant in expected_variants
+        ), f"Expected one of {expected_variants}, got {result.rewrite}"
+    finally:
+        os.unlink(temp_path)

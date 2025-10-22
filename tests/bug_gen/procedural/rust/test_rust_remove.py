@@ -1,9 +1,13 @@
 import pytest
+import tempfile
+import os
+from swesmith.bug_gen.adapters.rust import get_entities_from_file_rs
 from swesmith.bug_gen.procedural.rust.remove import (
     RemoveLoopModifier,
     RemoveConditionalModifier,
     RemoveAssignModifier,
 )
+import random
 
 
 @pytest.mark.parametrize(
@@ -51,18 +55,26 @@ from swesmith.bug_gen.procedural.rust.remove import (
 )
 def test_remove_loop_modifier(src, expected):
     """Test that RemoveLoopModifier removes loop statements."""
-    from swesmith.bug_gen.procedural.rust.remove import RUST_LANGUAGE
-    from tree_sitter import Parser
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
+        f.write(src)
+        f.flush()
+        temp_path = f.name
 
-    parser = Parser(RUST_LANGUAGE)
-    tree = parser.parse(bytes(src, "utf8"))
+    try:
+        entities = []
+        get_entities_from_file_rs(entities, temp_path)
+        assert len(entities) == 1
 
-    modifier = RemoveLoopModifier(likelihood=1.0, seed=42)
-    result = modifier._remove_loops(src, tree.root_node)
+        modifier = RemoveLoopModifier(likelihood=1.0, seed=42)
+        modifier.rand = random.Random(42)
+        result = modifier.modify(entities[0])
 
-    assert result.strip() == expected.strip(), (
-        f"Expected:\n{expected}\n\nGot:\n{result}"
-    )
+        assert result is not None
+        assert result.rewrite.strip() == expected.strip(), (
+            f"Expected {expected}, got {result.rewrite}"
+        )
+    finally:
+        os.unlink(temp_path)
 
 
 @pytest.mark.parametrize(
@@ -110,18 +122,26 @@ def test_remove_loop_modifier(src, expected):
 )
 def test_remove_conditional_modifier(src, expected):
     """Test that RemoveConditionalModifier removes conditional statements."""
-    from swesmith.bug_gen.procedural.rust.remove import RUST_LANGUAGE
-    from tree_sitter import Parser
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
+        f.write(src)
+        f.flush()
+        temp_path = f.name
 
-    parser = Parser(RUST_LANGUAGE)
-    tree = parser.parse(bytes(src, "utf8"))
+    try:
+        entities = []
+        get_entities_from_file_rs(entities, temp_path)
+        assert len(entities) == 1
 
-    modifier = RemoveConditionalModifier(likelihood=1.0, seed=42)
-    result = modifier._remove_conditionals(src, tree.root_node)
+        modifier = RemoveConditionalModifier(likelihood=1.0, seed=42)
+        modifier.rand = random.Random(42)
+        result = modifier.modify(entities[0])
 
-    assert result.strip() == expected.strip(), (
-        f"Expected:\n{expected}\n\nGot:\n{result}"
-    )
+        assert result is not None
+        assert result.rewrite.strip() == expected.strip(), (
+            f"Expected {expected}, got {result.rewrite}"
+        )
+    finally:
+        os.unlink(temp_path)
 
 
 @pytest.mark.parametrize(
@@ -175,15 +195,23 @@ def test_remove_conditional_modifier(src, expected):
 )
 def test_remove_assign_modifier(src, expected):
     """Test that RemoveAssignModifier removes assignment statements."""
-    from swesmith.bug_gen.procedural.rust.remove import RUST_LANGUAGE
-    from tree_sitter import Parser
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
+        f.write(src)
+        f.flush()
+        temp_path = f.name
 
-    parser = Parser(RUST_LANGUAGE)
-    tree = parser.parse(bytes(src, "utf8"))
+    try:
+        entities = []
+        get_entities_from_file_rs(entities, temp_path)
+        assert len(entities) == 1
 
-    modifier = RemoveAssignModifier(likelihood=1.0, seed=42)
-    result = modifier._remove_assignments(src, tree.root_node)
+        modifier = RemoveAssignModifier(likelihood=1.0, seed=42)
+        modifier.rand = random.Random(42)
+        result = modifier.modify(entities[0])
 
-    assert result.strip() == expected.strip(), (
-        f"Expected:\n{expected}\n\nGot:\n{result}"
-    )
+        assert result is not None
+        assert result.rewrite.strip() == expected.strip(), (
+            f"Expected {expected}, got {result.rewrite}"
+        )
+    finally:
+        os.unlink(temp_path)
