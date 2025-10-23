@@ -23,14 +23,24 @@ class JavaScriptProfile(RepoProfile):
     ) -> list:
         """
         Override to exclude JavaScript build artifacts by default.
-        
+
         JavaScript projects often have build/dist directories that contain
         transpiled/bundled code. We should only analyze source files.
         """
         if dirs_exclude is None:
             # Default exclusions for JavaScript projects
-            dirs_exclude = ["dist", "build", "node_modules", "coverage", ".next", "out", "examples", "docs", "bin"]
-        
+            dirs_exclude = [
+                "dist",
+                "build",
+                "node_modules",
+                "coverage",
+                ".next",
+                "out",
+                "examples",
+                "docs",
+                "bin",
+            ]
+
         return super().extract_entities(
             dirs_exclude=dirs_exclude,
             dirs_include=dirs_include,

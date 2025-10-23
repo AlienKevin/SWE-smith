@@ -206,7 +206,9 @@ class ControlShuffleLinesModifier(JavaScriptProceduralModifier):
             # Build new block content
             new_statements = []
             for stmt in statements:
-                stmt_text = source_bytes[stmt.start_byte : stmt.end_byte].decode("utf-8")
+                stmt_text = source_bytes[stmt.start_byte : stmt.end_byte].decode(
+                    "utf-8"
+                )
                 new_statements.append(stmt_text)
 
             # Find the opening and closing braces

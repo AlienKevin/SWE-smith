@@ -375,9 +375,9 @@ class OperationBreakChainsModifier(JavaScriptProceduralModifier):
                         operator_text = source_bytes[
                             operator.start_byte : operator.end_byte
                         ].decode("utf-8")
-                        right_text = source_bytes[right.start_byte : right.end_byte].decode(
-                            "utf-8"
-                        )
+                        right_text = source_bytes[
+                            right.start_byte : right.end_byte
+                        ].decode("utf-8")
                         changes.append(
                             {
                                 "node": n,
@@ -390,9 +390,9 @@ class OperationBreakChainsModifier(JavaScriptProceduralModifier):
                     # a + (b + c) -> a + b (take left of right chain)
                     if len(right.children) >= 3:
                         right_left = right.children[0]
-                        left_text = source_bytes[left.start_byte : left.end_byte].decode(
-                            "utf-8"
-                        )
+                        left_text = source_bytes[
+                            left.start_byte : left.end_byte
+                        ].decode("utf-8")
                         operator_text = source_bytes[
                             operator.start_byte : operator.end_byte
                         ].decode("utf-8")
