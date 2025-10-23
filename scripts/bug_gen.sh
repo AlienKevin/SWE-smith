@@ -8,13 +8,13 @@ export DOCKER_HOST=unix://$HOME/.docker/run/docker.sock
 # Clean up stale containers from previous run
 docker ps -a | grep swesmith.val | awk '{print $1}' | xargs docker rm -f 2>/dev/null || true
 
-REPO_NAME="${1:-Instagram/MonkeyType}"
+REPO_NAME="${1:-iamkun/dayjs}"
 MAX_BUGS="${2:-100}"
-DOCKER_IMAGE="jyangballin/swesmith.x86_64.instagram_1776_monkeytype.70c3acf6"
+DOCKER_IMAGE="jyangballin/swesmith.x86_64.iamkun_1776_dayjs.c8a26460"
 
 REPO_OWNER=$(echo "$REPO_NAME" | cut -d'/' -f1)
 REPO_NAME_ONLY=$(echo "$REPO_NAME" | cut -d'/' -f2)
-REPO_ID="${REPO_OWNER}__${REPO_NAME_ONLY}.70c3acf6"
+REPO_ID="${REPO_OWNER}__${REPO_NAME_ONLY}.c8a26460"
 
 echo "=========================================="
 echo "Procedural Bug Generation for SWE-smith"

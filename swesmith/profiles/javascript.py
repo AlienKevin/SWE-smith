@@ -14,6 +14,30 @@ class JavaScriptProfile(RepoProfile):
     Profile for JavaScript repositories.
     """
 
+    def extract_entities(
+        self,
+        dirs_exclude: list[str] = None,
+        dirs_include: list[str] = [],
+        exclude_tests: bool = True,
+        max_entities: int = -1,
+    ) -> list:
+        """
+        Override to exclude JavaScript build artifacts by default.
+        
+        JavaScript projects often have build/dist directories that contain
+        transpiled/bundled code. We should only analyze source files.
+        """
+        if dirs_exclude is None:
+            # Default exclusions for JavaScript projects
+            dirs_exclude = ["dist", "build", "node_modules", "coverage", ".next", "out", "examples", "docs", "bin"]
+        
+        return super().extract_entities(
+            dirs_exclude=dirs_exclude,
+            dirs_include=dirs_include,
+            exclude_tests=exclude_tests,
+            max_entities=max_entities,
+        )
+
 
 def default_npm_install_dockerfile(mirror_name: str, node_version: str = "18") -> str:
     return f"""FROM node:{node_version}-bullseye
