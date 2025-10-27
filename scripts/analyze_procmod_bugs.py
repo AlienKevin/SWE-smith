@@ -230,103 +230,119 @@ def save_report(analysis: Dict[str, Any], output_file: str) -> None:
 
 def discover_repos() -> list[str]:
     """Discover all repos under logs/run_validation.
-    
+
     Returns:
         List of repo IDs found in the validation directory
     """
     validation_base = Path("logs/run_validation")
     if not validation_base.exists():
         return []
-    
+
     repos = []
     for item in validation_base.iterdir():
         if item.is_dir():
             repos.append(item.name)
-    
+
     return sorted(repos)
 
 
 def print_aggregate_statistics(all_analyses: list[Dict[str, Any]]) -> None:
     """Print aggregate statistics across all repos."""
-    
+
     total_repos = len(all_analyses)
-    total_generated = sum(a['total_generated'] for a in all_analyses)
-    total_validated = sum(a['total_validated'] for a in all_analyses)
-    total_passed = sum(a['total_passed'] for a in all_analyses)
-    total_failed = sum(a['total_failed'] for a in all_analyses)
-    
+    total_generated = sum(a["total_generated"] for a in all_analyses)
+    total_validated = sum(a["total_validated"] for a in all_analyses)
+    total_passed = sum(a["total_passed"] for a in all_analyses)
+    total_failed = sum(a["total_failed"] for a in all_analyses)
+
     # Aggregate by modifier across all repos
-    modifier_stats = defaultdict(lambda: {
-        'generated': 0,
-        'validated': 0,
-        'passed': 0,
-        'failed': 0,
-        'f2p_counts': [],
-        'p2p_counts': []
-    })
-    
+    modifier_stats = defaultdict(
+        lambda: {
+            "generated": 0,
+            "validated": 0,
+            "passed": 0,
+            "failed": 0,
+            "f2p_counts": [],
+            "p2p_counts": [],
+        }
+    )
+
     for analysis in all_analyses:
-        for modifier, count in analysis['generated_by_modifier'].items():
-            modifier_stats[modifier]['generated'] += count
-        
-        for modifier, data in analysis['validated_by_modifier'].items():
-            modifier_stats[modifier]['validated'] += data['total']
-            modifier_stats[modifier]['passed'] += data['passed']
-            modifier_stats[modifier]['failed'] += data['failed']
-            modifier_stats[modifier]['f2p_counts'].extend(data['f2p_counts'])
-            modifier_stats[modifier]['p2p_counts'].extend(data['p2p_counts'])
-    
+        for modifier, count in analysis["generated_by_modifier"].items():
+            modifier_stats[modifier]["generated"] += count
+
+        for modifier, data in analysis["validated_by_modifier"].items():
+            modifier_stats[modifier]["validated"] += data["total"]
+            modifier_stats[modifier]["passed"] += data["passed"]
+            modifier_stats[modifier]["failed"] += data["failed"]
+            modifier_stats[modifier]["f2p_counts"].extend(data["f2p_counts"])
+            modifier_stats[modifier]["p2p_counts"].extend(data["p2p_counts"])
+
     print("\n")
-    print("="*80)
+    print("=" * 80)
     print("AGGREGATE STATISTICS ACROSS ALL REPOS")
-    print("="*80)
+    print("=" * 80)
     print()
-    
+
     print("OVERALL STATISTICS")
-    print("-"*80)
+    print("-" * 80)
     print(f"Total repositories analyzed:    {total_repos}")
     print(f"Total bugs generated:           {total_generated}")
     print(f"Total bugs validated:           {total_validated}")
     if total_validated > 0:
-        print(f"Bugs that passed validation:    {total_passed} ({total_passed / total_validated * 100:.1f}%)")
-        print(f"Bugs that failed validation:    {total_failed} ({total_failed / total_validated * 100:.1f}%)")
+        print(
+            f"Bugs that passed validation:    {total_passed} ({total_passed / total_validated * 100:.1f}%)"
+        )
+        print(
+            f"Bugs that failed validation:    {total_failed} ({total_failed / total_validated * 100:.1f}%)"
+        )
     print()
-    
+
     print("PER-MODIFIER STATISTICS (AGGREGATED)")
-    print("-"*80)
-    print(f"{'Modifier':<35} {'Generated':<12} {'Validated':<12} {'Passed':<12} {'Pass Rate':<12}")
-    print("-"*80)
-    
-    sorted_modifiers = sorted(modifier_stats.items(), key=lambda x: x[1]['generated'], reverse=True)
-    
+    print("-" * 80)
+    print(
+        f"{'Modifier':<35} {'Generated':<12} {'Validated':<12} {'Passed':<12} {'Pass Rate':<12}"
+    )
+    print("-" * 80)
+
+    sorted_modifiers = sorted(
+        modifier_stats.items(), key=lambda x: x[1]["generated"], reverse=True
+    )
+
     for modifier, stats in sorted_modifiers:
-        validated_count = stats['validated']
-        passed_count = stats['passed']
+        validated_count = stats["validated"]
+        passed_count = stats["passed"]
         pass_rate = (passed_count / max(validated_count, 1)) * 100
-        
-        print(f"{modifier:<35} {stats['generated']:<12} {validated_count:<12} {passed_count:<12} {pass_rate:>10.1f}%")
-    
+
+        print(
+            f"{modifier:<35} {stats['generated']:<12} {validated_count:<12} {passed_count:<12} {pass_rate:>10.1f}%"
+        )
+
     print()
-    
+
     print("TEST FAILURE STATISTICS (AGGREGATED)")
-    print("-"*80)
-    print(f"{'Modifier':<35} {'Avg F2P':<12} {'Min F2P':<12} {'Max F2P':<12} {'Avg P2P':<12}")
-    print("-"*80)
-    
+    print("-" * 80)
+    print(
+        f"{'Modifier':<35} {'Avg F2P':<12} {'Min F2P':<12} {'Max F2P':<12} {'Avg P2P':<12}"
+    )
+    print("-" * 80)
+
     for modifier, stats in sorted_modifiers:
-        f2p_counts = stats['f2p_counts']
-        p2p_counts = stats['p2p_counts']
-        
+        f2p_counts = stats["f2p_counts"]
+        p2p_counts = stats["p2p_counts"]
+
         if f2p_counts:
             avg_f2p = sum(f2p_counts) / len(f2p_counts)
             min_f2p = min(f2p_counts)
             max_f2p = max(f2p_counts)
             avg_p2p = sum(p2p_counts) / len(p2p_counts)
-            
-            print(f"{modifier:<35} {avg_f2p:<12.2f} {min_f2p:<12} {max_f2p:<12} {avg_p2p:<12.2f}")
-    
+
+            print(
+                f"{modifier:<35} {avg_f2p:<12.2f} {min_f2p:<12} {max_f2p:<12} {avg_p2p:<12.2f}"
+            )
+
     print()
-    print("="*80)
+    print("=" * 80)
 
 
 def main():
@@ -354,26 +370,26 @@ def main():
         # Analyze single repo
         analysis = analyze_bugs(args.repo)
         print_statistics(analysis)
-        
+
         if args.output is None:
             output_dir = Path("logs/analysis")
             output_dir.mkdir(parents=True, exist_ok=True)
             args.output = str(output_dir / f"{args.repo}_analysis.json")
-        
+
         save_report(analysis, args.output)
     else:
         # Analyze all repos
         repos = discover_repos()
-        
+
         if not repos:
             print("No repositories found in logs/run_validation/")
             return
-        
+
         print(f"Found {len(repos)} repositories to analyze")
         print()
-        
+
         all_analyses = []
-        
+
         for repo in repos:
             try:
                 analysis = analyze_bugs(repo)
@@ -383,73 +399,79 @@ def main():
             except FileNotFoundError as e:
                 print(f"Skipping {repo}: {e}")
                 print()
-        
+
         if all_analyses:
             print_aggregate_statistics(all_analyses)
-            
+
             # Save aggregate report
             if args.output is None:
                 output_dir = Path("logs/analysis")
                 output_dir.mkdir(parents=True, exist_ok=True)
                 args.output = str(output_dir / "aggregate_analysis.json")
-            
+
             # Calculate aggregate statistics for JSON
-            total_generated = sum(a['total_generated'] for a in all_analyses)
-            total_validated = sum(a['total_validated'] for a in all_analyses)
-            total_passed = sum(a['total_passed'] for a in all_analyses)
-            total_failed = sum(a['total_failed'] for a in all_analyses)
-            
-            modifier_stats = defaultdict(lambda: {
-                'generated': 0,
-                'validated': 0,
-                'passed': 0,
-                'failed': 0,
-                'f2p_counts': [],
-                'p2p_counts': []
-            })
-            
+            total_generated = sum(a["total_generated"] for a in all_analyses)
+            total_validated = sum(a["total_validated"] for a in all_analyses)
+            total_passed = sum(a["total_passed"] for a in all_analyses)
+            total_failed = sum(a["total_failed"] for a in all_analyses)
+
+            modifier_stats = defaultdict(
+                lambda: {
+                    "generated": 0,
+                    "validated": 0,
+                    "passed": 0,
+                    "failed": 0,
+                    "f2p_counts": [],
+                    "p2p_counts": [],
+                }
+            )
+
             for analysis in all_analyses:
-                for modifier, count in analysis['generated_by_modifier'].items():
-                    modifier_stats[modifier]['generated'] += count
-                
-                for modifier, data in analysis['validated_by_modifier'].items():
-                    modifier_stats[modifier]['validated'] += data['total']
-                    modifier_stats[modifier]['passed'] += data['passed']
-                    modifier_stats[modifier]['failed'] += data['failed']
-                    modifier_stats[modifier]['f2p_counts'].extend(data['f2p_counts'])
-                    modifier_stats[modifier]['p2p_counts'].extend(data['p2p_counts'])
-            
+                for modifier, count in analysis["generated_by_modifier"].items():
+                    modifier_stats[modifier]["generated"] += count
+
+                for modifier, data in analysis["validated_by_modifier"].items():
+                    modifier_stats[modifier]["validated"] += data["total"]
+                    modifier_stats[modifier]["passed"] += data["passed"]
+                    modifier_stats[modifier]["failed"] += data["failed"]
+                    modifier_stats[modifier]["f2p_counts"].extend(data["f2p_counts"])
+                    modifier_stats[modifier]["p2p_counts"].extend(data["p2p_counts"])
+
             # Calculate summary statistics for each modifier
             modifier_summaries = {}
             for modifier, stats in modifier_stats.items():
                 summary = {
-                    'generated': stats['generated'],
-                    'validated': stats['validated'],
-                    'passed': stats['passed'],
-                    'failed': stats['failed'],
-                    'pass_rate': (stats['passed'] / max(stats['validated'], 1)) * 100
+                    "generated": stats["generated"],
+                    "validated": stats["validated"],
+                    "passed": stats["passed"],
+                    "failed": stats["failed"],
+                    "pass_rate": (stats["passed"] / max(stats["validated"], 1)) * 100,
                 }
-                
-                if stats['f2p_counts']:
-                    summary['f2p_avg'] = sum(stats['f2p_counts']) / len(stats['f2p_counts'])
-                    summary['f2p_min'] = min(stats['f2p_counts'])
-                    summary['f2p_max'] = max(stats['f2p_counts'])
-                    summary['p2p_avg'] = sum(stats['p2p_counts']) / len(stats['p2p_counts'])
-                
+
+                if stats["f2p_counts"]:
+                    summary["f2p_avg"] = sum(stats["f2p_counts"]) / len(
+                        stats["f2p_counts"]
+                    )
+                    summary["f2p_min"] = min(stats["f2p_counts"])
+                    summary["f2p_max"] = max(stats["f2p_counts"])
+                    summary["p2p_avg"] = sum(stats["p2p_counts"]) / len(
+                        stats["p2p_counts"]
+                    )
+
                 modifier_summaries[modifier] = summary
-            
+
             aggregate_data = {
-                'total_repos': len(all_analyses),
-                'repos': [a['repo_id'] for a in all_analyses],
-                'aggregate_statistics': {
-                    'total_generated': total_generated,
-                    'total_validated': total_validated,
-                    'total_passed': total_passed,
-                    'total_failed': total_failed,
-                    'pass_rate': (total_passed / max(total_validated, 1)) * 100,
-                    'by_modifier': modifier_summaries
+                "total_repos": len(all_analyses),
+                "repos": [a["repo_id"] for a in all_analyses],
+                "aggregate_statistics": {
+                    "total_generated": total_generated,
+                    "total_validated": total_validated,
+                    "total_passed": total_passed,
+                    "total_failed": total_failed,
+                    "pass_rate": (total_passed / max(total_validated, 1)) * 100,
+                    "by_modifier": modifier_summaries,
                 },
-                'individual_analyses': all_analyses
+                "individual_analyses": all_analyses,
             }
             save_report(aggregate_data, args.output)
 
