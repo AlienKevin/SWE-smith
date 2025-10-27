@@ -124,7 +124,7 @@ def collect_patches(repo_id):
     except subprocess.CalledProcessError as e:
         print("Error: Patch collection failed.")
         raise
-    
+
     # Verify patches file was created
     if Path(patches_file).exists():
         with open(patches_file, "r") as f:
@@ -134,7 +134,7 @@ def collect_patches(repo_id):
     else:
         print(f"✗ Patches file not found: {patches_file}")
         raise
-    
+
     return patches_file
 
 
@@ -301,7 +301,7 @@ def main():
         "-m",
         type=int,
         default=200,
-        help="Maximum number of bugs per modifier (default: 200)"
+        help="Maximum number of bugs per modifier (default: 200)",
     )
     parser.add_argument(
         "--repo", "-r", help="Process only a specific repository (format: owner/repo)"
