@@ -20,11 +20,7 @@ def run_command(cmd, shell=False, capture_output=False, check=True):
     try:
         if capture_output:
             result = subprocess.run(
-                cmd,
-                shell=shell,
-                capture_output=True,
-                text=True,
-                check=check
+                cmd, shell=shell, capture_output=True, text=True, check=check
             )
             return result
         else:
@@ -45,16 +41,16 @@ def cleanup_containers():
             shell=True,
             capture_output=True,
             text=True,
-            check=False
+            check=False,
         )
         container_ids = result.stdout.strip()
-        
+
         if container_ids:
             subprocess.run(
                 f"echo {container_ids} | xargs docker rm -f",
                 shell=True,
                 check=False,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL,
             )
     except Exception:
         # Ignore cleanup errors
@@ -64,21 +60,19 @@ def cleanup_containers():
 def check_docker_image(image_name):
     """Check if Docker image exists, pull if not."""
     print(f"[Step 1/4] Verifying Docker image...")
-    
+
     # Check if image exists
     result = subprocess.run(
-        ["docker", "image", "inspect", image_name],
-        capture_output=True,
-        check=False
+        ["docker", "image", "inspect", image_name], capture_output=True, check=False
     )
-    
+
     if result.returncode == 0:
         print(f"✓ Docker image found: {image_name}")
         return True
-    
+
     print(f"✗ Docker image not found: {image_name}")
     print("Attempting to pull the image...")
-    
+
     try:
         subprocess.run(["docker", "pull", image_name], check=True)
         return True
@@ -90,12 +84,21 @@ def check_docker_image(image_name):
 def generate_bugs(repo_id, max_bugs):
     """Generate bugs procedurally."""
     print("\n[Step 2/4] Generating bugs procedurally...")
-    print(f"Running: python -m swesmith.bug_gen.procedural.generate {repo_id} --max_bugs {max_bugs}")
-    
+    print(
+        f"Running: python -m swesmith.bug_gen.procedural.generate {repo_id} --max_bugs {max_bugs}"
+    )
+
     try:
         subprocess.run(
-            ["python", "-m", "swesmith.bug_gen.procedural.generate", repo_id, "--max_bugs", str(max_bugs)],
-            check=True
+            [
+                "python",
+                "-m",
+                "swesmith.bug_gen.procedural.generate",
+                repo_id,
+                "--max_bugs",
+                str(max_bugs),
+            ],
+            check=True,
         )
     except subprocess.CalledProcessError:
         print("Error: Bug generation failed.")
@@ -107,26 +110,31 @@ def collect_patches(repo_id):
     print("\n[Step 3/4] Collecting all patches...")
     patches_file = f"logs/bug_gen/{repo_id}_all_patches.json"
     print(f"Running: python -m swesmith.bug_gen.collect_patches logs/bug_gen/{repo_id}")
-    
+
     try:
         subprocess.run(
-            ["python", "-m", "swesmith.bug_gen.collect_patches", f"logs/bug_gen/{repo_id}"],
-            check=True
+            [
+                "python",
+                "-m",
+                "swesmith.bug_gen.collect_patches",
+                f"logs/bug_gen/{repo_id}",
+            ],
+            check=True,
         )
     except subprocess.CalledProcessError:
         print("Error: Patch collection failed.")
         sys.exit(1)
-    
+
     # Verify patches file was created
     if Path(patches_file).exists():
-        with open(patches_file, 'r') as f:
+        with open(patches_file, "r") as f:
             patches = json.load(f)
             num_patches = len(patches)
         print(f"✓ Collected {num_patches} patches to {patches_file}")
     else:
         print(f"✗ Patches file not found: {patches_file}")
         sys.exit(1)
-    
+
     return patches_file
 
 
@@ -135,32 +143,26 @@ def get_num_cores():
     try:
         if platform.system() == "Darwin":  # macOS
             result = subprocess.run(
-                ["sysctl", "-n", "hw.ncpu"],
-                capture_output=True,
-                text=True,
-                check=False
+                ["sysctl", "-n", "hw.ncpu"], capture_output=True, text=True, check=False
             )
             if result.returncode == 0:
                 return int(result.stdout.strip())
         else:  # Linux
             result = subprocess.run(
-                ["nproc"],
-                capture_output=True,
-                text=True,
-                check=False
+                ["nproc"], capture_output=True, text=True, check=False
             )
             if result.returncode == 0:
                 return int(result.stdout.strip())
     except Exception:
         pass
-    
+
     # Default to 8 if detection fails
     return 8
 
 
 def run_validation(patches_file, num_cores, timeout_seconds):
     """Run validation on generated patches with a configurable timeout.
-    
+
     Args:
         patches_file: Path to patches JSON file
         num_cores: Number of cores for parallel validation
@@ -168,13 +170,20 @@ def run_validation(patches_file, num_cores, timeout_seconds):
     """
     print(f"\n[Step 4/4] Running validation...")
     print(f"Running: python -m swesmith.harness.valid {patches_file} -w {num_cores}")
-    print(f"Timeout: {timeout_seconds} seconds ({timeout_seconds/60:.1f} minutes)")
-    
+    print(f"Timeout: {timeout_seconds} seconds ({timeout_seconds / 60:.1f} minutes)")
+
     try:
         subprocess.run(
-            ["python", "-m", "swesmith.harness.valid", patches_file, "-w", str(num_cores)],
+            [
+                "python",
+                "-m",
+                "swesmith.harness.valid",
+                patches_file,
+                "-w",
+                str(num_cores),
+            ],
             check=True,
-            timeout=timeout_seconds
+            timeout=timeout_seconds,
         )
     except subprocess.TimeoutExpired:
         print(f"\n⚠️  Warning: Validation timed out after {timeout_seconds} seconds.")
@@ -185,13 +194,13 @@ def run_validation(patches_file, num_cores, timeout_seconds):
 
 def get_rust_repos() -> List[Tuple[str, str, str]]:
     """Extract all Rust repository profiles.
-    
+
     Returns:
         List of tuples (owner, repo, commit)
     """
     from swesmith.profiles.rust import RustProfile
     import swesmith.profiles.rust as rust_module
-    
+
     repos = []
     for name, obj in inspect.getmembers(rust_module):
         if (
@@ -208,10 +217,10 @@ def get_rust_repos() -> List[Tuple[str, str, str]]:
 
 def get_repos_for_language(language: str) -> List[Tuple[str, str, str]]:
     """Get all repositories for a given language.
-    
+
     Args:
         language: Programming language (e.g., 'rust', 'python', 'go')
-        
+
     Returns:
         List of tuples (owner, repo, commit)
     """
@@ -232,13 +241,21 @@ def print_summary(repo_id, patches_file):
     print("\nNext steps:")
     print(f"  1. Review validation results in logs/run_validation/{repo_id}/")
     print(f"  2. Analyze bugs with: python scripts/analyze_procmod_bugs.py {repo_id}")
-    print(f"  3. Collect validated instances: python -m swesmith.harness.gather logs/run_validation/{repo_id}")
+    print(
+        f"  3. Collect validated instances: python -m swesmith.harness.gather logs/run_validation/{repo_id}"
+    )
     print("=" * 42)
 
 
-def process_repo(repo_owner: str, repo_name_only: str, repo_commit: str, max_bugs: int, validation_timeout: int):
+def process_repo(
+    repo_owner: str,
+    repo_name_only: str,
+    repo_commit: str,
+    max_bugs: int,
+    validation_timeout: int,
+):
     """Process a single repository through the bug generation pipeline.
-    
+
     Args:
         repo_owner: Repository owner
         repo_name_only: Repository name
@@ -249,7 +266,7 @@ def process_repo(repo_owner: str, repo_name_only: str, repo_commit: str, max_bug
     repo_name = f"{repo_owner}/{repo_name_only}"
     repo_id = f"{repo_owner}__{repo_name_only}.{repo_commit}"
     docker_image = f"jyangballin/swesmith.x86_64.{repo_owner.lower()}_{1776}_{repo_name_only.lower()}.{repo_commit}"
-    
+
     # Print header
     print("\n" + "=" * 42)
     print("Procedural Bug Generation for SWE-smith")
@@ -260,7 +277,7 @@ def process_repo(repo_owner: str, repo_name_only: str, repo_commit: str, max_bug
     print(f"Docker image: {docker_image}")
     print("=" * 42)
     print()
-    
+
     # Execute pipeline
     check_docker_image(docker_image)
     generate_bugs(repo_id, max_bugs)
@@ -278,60 +295,60 @@ def main():
         "--language",
         "-l",
         default="rust",
-        help="Programming language to process (default: rust)"
+        help="Programming language to process (default: rust)",
     )
     parser.add_argument(
         "--max-bugs",
         "-m",
         type=int,
         default=-1,
-        help="Maximum number of bugs per modifier (default: -1 for unlimited)"
+        help="Maximum number of bugs per modifier (default: -1 for unlimited)",
     )
     parser.add_argument(
-        "--repo",
-        "-r",
-        help="Process only a specific repository (format: owner/repo)"
+        "--repo", "-r", help="Process only a specific repository (format: owner/repo)"
     )
     parser.add_argument(
         "--validation-timeout",
         "-t",
         type=int,
         default=300,
-        help="Timeout in seconds for validation step (default: 300)"
+        help="Timeout in seconds for validation step (default: 300)",
     )
-    
+
     args = parser.parse_args()
-    
+
     # Set Docker host for macOS
     if platform.system() == "Darwin":
         home = os.path.expanduser("~")
         os.environ["DOCKER_HOST"] = f"unix://{home}/.docker/run/docker.sock"
-    
+
     # Clean up stale containers
     cleanup_containers()
-    
+
     # Get repositories to process
     if args.repo:
         # Single repository mode
         repos = get_repos_for_language(args.language)
-        repo_owner, repo_name_only = args.repo.split('/')
-        
+        repo_owner, repo_name_only = args.repo.split("/")
+
         # Find matching repo with commit
         matching_repo = None
         for owner, repo, commit in repos:
             if owner == repo_owner and repo == repo_name_only:
                 matching_repo = (owner, repo, commit)
                 break
-        
+
         if not matching_repo:
-            print(f"Error: Repository {args.repo} not found in {args.language} profiles")
+            print(
+                f"Error: Repository {args.repo} not found in {args.language} profiles"
+            )
             sys.exit(1)
-        
+
         repos = [matching_repo]
     else:
         # All repositories mode
         repos = get_repos_for_language(args.language)
-    
+
     # Print overall summary
     print("=" * 60)
     print(f"Processing {len(repos)} {args.language.upper()} repositories")
@@ -339,20 +356,26 @@ def main():
     for i, (owner, repo, commit) in enumerate(repos, 1):
         print(f"{i:2d}. {owner}/{repo} @ {commit}")
     print("=" * 60)
-    
+
     # Process each repository
     for i, (repo_owner, repo_name_only, repo_commit) in enumerate(repos, 1):
-        print(f"\n\n{'='*60}")
+        print(f"\n\n{'=' * 60}")
         print(f"Processing repository {i}/{len(repos)}: {repo_owner}/{repo_name_only}")
-        print(f"{'='*60}")
-        
+        print(f"{'=' * 60}")
+
         try:
-            process_repo(repo_owner, repo_name_only, repo_commit, args.max_bugs, args.validation_timeout)
+            process_repo(
+                repo_owner,
+                repo_name_only,
+                repo_commit,
+                args.max_bugs,
+                args.validation_timeout,
+            )
         except Exception as e:
             print(f"\n⚠️  Error processing {repo_owner}/{repo_name_only}: {e}")
             print("Continuing to next repository...")
             continue
-    
+
     # Final summary
     print("\n\n" + "=" * 60)
     print("All repositories processed!")
