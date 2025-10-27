@@ -76,9 +76,9 @@ def check_docker_image(image_name):
     try:
         subprocess.run(["docker", "pull", image_name], check=True)
         return True
-    except subprocess.CalledProcessError:
+    except subprocess.CalledProcessError as e:
         print("Error: Failed to pull Docker image. Please ensure the image exists.")
-        sys.exit(1)
+        raise
 
 
 def generate_bugs(repo_id, max_bugs):
@@ -100,9 +100,9 @@ def generate_bugs(repo_id, max_bugs):
             ],
             check=True,
         )
-    except subprocess.CalledProcessError:
+    except subprocess.CalledProcessError as e:
         print("Error: Bug generation failed.")
-        sys.exit(1)
+        raise
 
 
 def collect_patches(repo_id):
@@ -121,10 +121,10 @@ def collect_patches(repo_id):
             ],
             check=True,
         )
-    except subprocess.CalledProcessError:
+    except subprocess.CalledProcessError as e:
         print("Error: Patch collection failed.")
-        sys.exit(1)
-
+        raise
+    
     # Verify patches file was created
     if Path(patches_file).exists():
         with open(patches_file, "r") as f:
@@ -133,8 +133,8 @@ def collect_patches(repo_id):
         print(f"✓ Collected {num_patches} patches to {patches_file}")
     else:
         print(f"✗ Patches file not found: {patches_file}")
-        sys.exit(1)
-
+        raise
+    
     return patches_file
 
 
@@ -227,8 +227,7 @@ def get_repos_for_language(language: str) -> List[Tuple[str, str, str]]:
     if language.lower() == "rust":
         return get_rust_repos()
     else:
-        print(f"Error: Language '{language}' is not supported yet.")
-        sys.exit(1)
+        raise ValueError(f"Language '{language}' is not supported yet.")
 
 
 def print_summary(repo_id, patches_file):
@@ -301,8 +300,8 @@ def main():
         "--max-bugs",
         "-m",
         type=int,
-        default=-1,
-        help="Maximum number of bugs per modifier (default: -1 for unlimited)",
+        default=200,
+        help="Maximum number of bugs per modifier (default: 200)"
     )
     parser.add_argument(
         "--repo", "-r", help="Process only a specific repository (format: owner/repo)"
