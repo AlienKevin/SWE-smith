@@ -10,11 +10,46 @@ docker ps -a | grep swesmith.val | awk '{print $1}' | xargs docker rm -f 2>/dev/
 
 REPO_NAME="${1:-iamkun/dayjs}"
 MAX_BUGS="${2:-100}"
-DOCKER_IMAGE="jyangballin/swesmith.x86_64.iamkun_1776_dayjs.c8a26460"
 
-REPO_OWNER=$(echo "$REPO_NAME" | cut -d'/' -f1)
-REPO_NAME_ONLY=$(echo "$REPO_NAME" | cut -d'/' -f2)
-REPO_ID="${REPO_OWNER}__${REPO_NAME_ONLY}.c8a26460"
+# Function to get repo info from registry
+get_repo_info() {
+    local repo_name="$1"
+    python3 -c "
+import sys
+sys.path.append('.')
+from swesmith.profiles import registry
+
+repo_name = '$repo_name'
+for name, profile_class in registry.data.items():
+    if hasattr(profile_class, 'owner') and hasattr(profile_class, 'repo'):
+        if f\"{profile_class.owner}/{profile_class.repo}\" == repo_name:
+            # Create instance to access properties
+            instance = profile_class()
+            print(f\"{profile_class.owner}__{profile_class.repo}.{profile_class.commit[:8]}|{instance.image_name}\")
+            sys.exit(0)
+print('REPO_NOT_FOUND', file=sys.stderr)
+sys.exit(1)
+"
+}
+
+# Get repository information
+echo "Looking up repository: $REPO_NAME"
+REPO_INFO=$(get_repo_info "$REPO_NAME" 2>/dev/null) || {
+    echo "Error: Repository '$REPO_NAME' not found in registry."
+    echo "Available JavaScript repositories:"
+    python3 -c "
+import sys
+sys.path.append('.')
+from swesmith.profiles import registry
+for name, profile_class in registry.data.items():
+    if hasattr(profile_class, 'owner') and hasattr(profile_class, 'repo'):
+        print(f\"  {profile_class.owner}/{profile_class.repo}\")
+" | sort | uniq
+    exit 1
+}
+
+REPO_ID=$(echo "$REPO_INFO" | cut -d'|' -f1)
+DOCKER_IMAGE=$(echo "$REPO_INFO" | cut -d'|' -f2)
 
 echo "=========================================="
 echo "Procedural Bug Generation for SWE-smith"
