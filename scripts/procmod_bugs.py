@@ -5,12 +5,14 @@ Converts the procedural_bug_gen.sh script to Python
 """
 
 import argparse
+import inspect
 import json
 import os
 import platform
 import subprocess
 import sys
 from pathlib import Path
+from typing import List, Tuple
 
 
 def run_command(cmd, shell=False, capture_output=False, check=True):
@@ -156,18 +158,68 @@ def get_num_cores():
     return 8
 
 
-def run_validation(patches_file, num_cores):
-    """Run validation on generated patches."""
+def run_validation(patches_file, num_cores, timeout_seconds):
+    """Run validation on generated patches with a configurable timeout.
+    
+    Args:
+        patches_file: Path to patches JSON file
+        num_cores: Number of cores for parallel validation
+        timeout_seconds: Timeout in seconds for validation
+    """
     print(f"\n[Step 4/4] Running validation...")
     print(f"Running: python -m swesmith.harness.valid {patches_file} -w {num_cores}")
+    print(f"Timeout: {timeout_seconds} seconds ({timeout_seconds/60:.1f} minutes)")
     
     try:
         subprocess.run(
             ["python", "-m", "swesmith.harness.valid", patches_file, "-w", str(num_cores)],
-            check=True
+            check=True,
+            timeout=timeout_seconds
         )
+    except subprocess.TimeoutExpired:
+        print(f"\n⚠️  Warning: Validation timed out after {timeout_seconds} seconds.")
+        print("Partial results may be available.")
     except subprocess.CalledProcessError:
         print("Warning: Validation encountered errors but may have partial results.")
+
+
+def get_rust_repos() -> List[Tuple[str, str, str]]:
+    """Extract all Rust repository profiles.
+    
+    Returns:
+        List of tuples (owner, repo, commit)
+    """
+    from swesmith.profiles.rust import RustProfile
+    import swesmith.profiles.rust as rust_module
+    
+    repos = []
+    for name, obj in inspect.getmembers(rust_module):
+        if (
+            inspect.isclass(obj)
+            and issubclass(obj, RustProfile)
+            and obj.__name__ != "RustProfile"
+        ):
+            # Instantiate to get the values
+            instance = obj()
+            repos.append((instance.owner, instance.repo, instance.commit[:8]))
+
+    return repos
+
+
+def get_repos_for_language(language: str) -> List[Tuple[str, str, str]]:
+    """Get all repositories for a given language.
+    
+    Args:
+        language: Programming language (e.g., 'rust', 'python', 'go')
+        
+    Returns:
+        List of tuples (owner, repo, commit)
+    """
+    if language.lower() == "rust":
+        return get_rust_repos()
+    else:
+        print(f"Error: Language '{language}' is not supported yet.")
+        sys.exit(1)
 
 
 def print_summary(repo_id, patches_file):
@@ -179,48 +231,27 @@ def print_summary(repo_id, patches_file):
     print(f"Validation results: logs/run_validation/{repo_id}/")
     print("\nNext steps:")
     print(f"  1. Review validation results in logs/run_validation/{repo_id}/")
-    print(f"  2. Analyze bugs with: python scripts/analyze_bugs.py {repo_id}")
+    print(f"  2. Analyze bugs with: python scripts/analyze_procmod_bugs.py {repo_id}")
     print(f"  3. Collect validated instances: python -m swesmith.harness.gather logs/run_validation/{repo_id}")
     print("=" * 42)
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Procedural Bug Generation for SWE-smith"
-    )
-    parser.add_argument(
-        "repo_name",
-        nargs="?",
-        default="dtolnay/anyhow",
-        help="Repository name in format owner/repo (default: dtolnay/anyhow)"
-    )
-    parser.add_argument(
-        "max_bugs",
-        nargs="?",
-        type=int,
-        default=-1,
-        help="Maximum number of bugs per modifier (default: -1 for unlimited)"
-    )
+def process_repo(repo_owner: str, repo_name_only: str, repo_commit: str, max_bugs: int, validation_timeout: int):
+    """Process a single repository through the bug generation pipeline.
     
-    args = parser.parse_args()
-    
-    # Configuration
-    repo_name = args.repo_name
-    max_bugs = args.max_bugs
-    repo_commit = "1d7ef1db"
-    
-    # Parse repository name
-    repo_owner, repo_name_only = repo_name.split('/')
+    Args:
+        repo_owner: Repository owner
+        repo_name_only: Repository name
+        repo_commit: Commit hash (short form)
+        max_bugs: Maximum bugs per modifier
+        validation_timeout: Timeout in seconds for validation step
+    """
+    repo_name = f"{repo_owner}/{repo_name_only}"
     repo_id = f"{repo_owner}__{repo_name_only}.{repo_commit}"
-    docker_image = f"jyangballin/swesmith.x86_64.{repo_owner}_{1776}_{repo_name_only}.{repo_commit}"
-    
-    # Set Docker host for macOS
-    if platform.system() == "Darwin":
-        home = os.path.expanduser("~")
-        os.environ["DOCKER_HOST"] = f"unix://{home}/.docker/run/docker.sock"
+    docker_image = f"jyangballin/swesmith.x86_64.{repo_owner.lower()}_{1776}_{repo_name_only.lower()}.{repo_commit}"
     
     # Print header
-    print("=" * 42)
+    print("\n" + "=" * 42)
     print("Procedural Bug Generation for SWE-smith")
     print("=" * 42)
     print(f"Repository: {repo_name}")
@@ -230,16 +261,102 @@ def main():
     print("=" * 42)
     print()
     
-    # Clean up stale containers
-    cleanup_containers()
-    
     # Execute pipeline
     check_docker_image(docker_image)
     generate_bugs(repo_id, max_bugs)
     patches_file = collect_patches(repo_id)
     num_cores = get_num_cores()
-    run_validation(patches_file, num_cores)
+    run_validation(patches_file, num_cores, validation_timeout)
     print_summary(repo_id, patches_file)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Procedural Bug Generation for SWE-smith"
+    )
+    parser.add_argument(
+        "--language",
+        "-l",
+        default="rust",
+        help="Programming language to process (default: rust)"
+    )
+    parser.add_argument(
+        "--max-bugs",
+        "-m",
+        type=int,
+        default=-1,
+        help="Maximum number of bugs per modifier (default: -1 for unlimited)"
+    )
+    parser.add_argument(
+        "--repo",
+        "-r",
+        help="Process only a specific repository (format: owner/repo)"
+    )
+    parser.add_argument(
+        "--validation-timeout",
+        "-t",
+        type=int,
+        default=300,
+        help="Timeout in seconds for validation step (default: 300)"
+    )
+    
+    args = parser.parse_args()
+    
+    # Set Docker host for macOS
+    if platform.system() == "Darwin":
+        home = os.path.expanduser("~")
+        os.environ["DOCKER_HOST"] = f"unix://{home}/.docker/run/docker.sock"
+    
+    # Clean up stale containers
+    cleanup_containers()
+    
+    # Get repositories to process
+    if args.repo:
+        # Single repository mode
+        repos = get_repos_for_language(args.language)
+        repo_owner, repo_name_only = args.repo.split('/')
+        
+        # Find matching repo with commit
+        matching_repo = None
+        for owner, repo, commit in repos:
+            if owner == repo_owner and repo == repo_name_only:
+                matching_repo = (owner, repo, commit)
+                break
+        
+        if not matching_repo:
+            print(f"Error: Repository {args.repo} not found in {args.language} profiles")
+            sys.exit(1)
+        
+        repos = [matching_repo]
+    else:
+        # All repositories mode
+        repos = get_repos_for_language(args.language)
+    
+    # Print overall summary
+    print("=" * 60)
+    print(f"Processing {len(repos)} {args.language.upper()} repositories")
+    print("=" * 60)
+    for i, (owner, repo, commit) in enumerate(repos, 1):
+        print(f"{i:2d}. {owner}/{repo} @ {commit}")
+    print("=" * 60)
+    
+    # Process each repository
+    for i, (repo_owner, repo_name_only, repo_commit) in enumerate(repos, 1):
+        print(f"\n\n{'='*60}")
+        print(f"Processing repository {i}/{len(repos)}: {repo_owner}/{repo_name_only}")
+        print(f"{'='*60}")
+        
+        try:
+            process_repo(repo_owner, repo_name_only, repo_commit, args.max_bugs, args.validation_timeout)
+        except Exception as e:
+            print(f"\n⚠️  Error processing {repo_owner}/{repo_name_only}: {e}")
+            print("Continuing to next repository...")
+            continue
+    
+    # Final summary
+    print("\n\n" + "=" * 60)
+    print("All repositories processed!")
+    print("=" * 60)
 
 
 if __name__ == "__main__":
