@@ -81,25 +81,24 @@ def check_docker_image(image_name):
         raise
 
 
-def generate_bugs(repo_id, max_bugs):
+def generate_bugs(repo_id, max_bugs, interleave=False):
     """Generate bugs procedurally."""
     print("\n[Step 2/4] Generating bugs procedurally...")
-    print(
-        f"Running: python -m swesmith.bug_gen.procedural.generate {repo_id} --max_bugs {max_bugs}"
-    )
+    cmd_parts = [
+        "python",
+        "-m",
+        "swesmith.bug_gen.procedural.generate",
+        repo_id,
+        "--max_bugs",
+        str(max_bugs),
+    ]
+    if interleave:
+        cmd_parts.append("--interleave")
+    
+    print(f"Running: {' '.join(cmd_parts)}")
 
     try:
-        subprocess.run(
-            [
-                "python",
-                "-m",
-                "swesmith.bug_gen.procedural.generate",
-                repo_id,
-                "--max_bugs",
-                str(max_bugs),
-            ],
-            check=True,
-        )
+        subprocess.run(cmd_parts, check=True)
     except subprocess.CalledProcessError as e:
         print("Error: Bug generation failed.")
         raise
@@ -252,6 +251,7 @@ def process_repo(
     repo_commit: str,
     max_bugs: int,
     validation_timeout: int,
+    interleave: bool = False,
 ):
     """Process a single repository through the bug generation pipeline.
 
@@ -279,7 +279,7 @@ def process_repo(
 
     # Execute pipeline
     check_docker_image(docker_image)
-    generate_bugs(repo_id, max_bugs)
+    generate_bugs(repo_id, max_bugs, interleave)
     patches_file = collect_patches(repo_id)
     num_cores = get_num_cores()
     run_validation(patches_file, num_cores, validation_timeout)
@@ -310,8 +310,13 @@ def main():
         "--validation-timeout",
         "-t",
         type=int,
-        default=300,
-        help="Timeout in seconds for validation step (default: 300)",
+        default=1200,
+        help="Timeout in seconds for validation step (default: 1200)",
+    )
+    parser.add_argument(
+        "--sequential",
+        action="store_true",
+        help="Process modifiers sequentially instead of randomized interleaving (default: interleave)",
     )
 
     args = parser.parse_args()
@@ -369,6 +374,7 @@ def main():
                 repo_commit,
                 args.max_bugs,
                 args.validation_timeout,
+                not args.sequential,  # interleave by default
             )
         except Exception as e:
             print(f"\n⚠️  Error processing {repo_owner}/{repo_name_only}: {e}")
