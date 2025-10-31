@@ -83,6 +83,8 @@ def analyze_bugs(repo_id: str) -> Dict[str, Any]:
         }
     )
 
+    timeout_bugs = defaultdict(list)
+    total_timeouts = 0
     total_validated = 0
     total_passed = 0
     total_failed = 0
@@ -96,11 +98,15 @@ def analyze_bugs(repo_id: str) -> Dict[str, Any]:
                 with open(report_path, "r") as f:
                     report = json.load(f)
 
+                modifier_name = extract_modifier_name(instance_dir)
+
                 # Only count as validated if report contains FAIL_TO_PASS field (excludes timeouts)
                 if FAIL_TO_PASS not in report:
+                    # This is a timeout case
+                    timeout_bugs[modifier_name].append(instance_dir)
+                    total_timeouts += 1
                     continue
 
-                modifier_name = extract_modifier_name(instance_dir)
                 total_validated += 1
 
                 f2p_count = len(report.get(FAIL_TO_PASS, []))
@@ -126,8 +132,10 @@ def analyze_bugs(repo_id: str) -> Dict[str, Any]:
         "total_validated": total_validated,
         "total_passed": total_passed,
         "total_failed": total_failed,
+        "total_timeouts": total_timeouts,
         "generated_by_modifier": {k: len(v) for k, v in generated_bugs.items()},
         "validated_by_modifier": dict(validated_bugs),
+        "timeout_by_modifier": {k: len(v) for k, v in timeout_bugs.items()},
     }
 
 
@@ -235,16 +243,19 @@ def save_report(analysis: Dict[str, Any], output_file: str) -> None:
     print(f"Detailed report saved to: {output_file}")
 
 
-def plot_bug_distribution(analysis: Dict[str, Any], output_path: str, show_generated_bugs: bool = False) -> None:
+def plot_bug_distribution(analysis: Dict[str, Any], output_path: str, show_generated_bugs: bool = False, show_timeout_bugs: bool = False) -> None:
     """Plot bar chart of bug distribution by modifier type.
 
     Args:
         analysis: Analysis results dictionary
         output_path: Path to save the plot
+        show_generated_bugs: Whether to show generated bugs bar
+        show_timeout_bugs: Whether to show timeout bugs bar stacked on validated
     """
     # Extract data
     generated_by_modifier = analysis.get("generated_by_modifier", {})
     validated_by_modifier = analysis.get("validated_by_modifier", {})
+    timeout_by_modifier = analysis.get("timeout_by_modifier", {})
 
     # If it's aggregate data, handle differently
     if "aggregate_statistics" in analysis:
@@ -254,6 +265,7 @@ def plot_bug_distribution(analysis: Dict[str, Any], output_path: str, show_gener
             k: {"total": v["validated"], "passed": v["passed"]}
             for k, v in modifier_data.items()
         }
+        timeout_by_modifier = {k: v.get("timeout", 0) for k, v in modifier_data.items()}
 
     if not generated_by_modifier:
         print("No data to plot")
@@ -268,9 +280,10 @@ def plot_bug_distribution(analysis: Dict[str, Any], output_path: str, show_gener
     modifiers_display = [m[0].replace("func_pm_", "") for m in sorted_modifiers]
     generated_counts = [m[1] for m in sorted_modifiers]
 
-    # Get validated and passed counts for each modifier
+    # Get validated, passed, and timeout counts for each modifier
     validated_counts = []
     passed_counts = []
+    timeout_counts = []
     for modifier_key in modifier_keys:
         if modifier_key in validated_by_modifier:
             if isinstance(validated_by_modifier[modifier_key], dict):
@@ -286,12 +299,15 @@ def plot_bug_distribution(analysis: Dict[str, Any], output_path: str, show_gener
         else:
             validated_counts.append(0)
             passed_counts.append(0)
+        
+        # Get timeout count for this modifier
+        timeout_counts.append(timeout_by_modifier.get(modifier_key, 0))
 
     # Filter out modifiers with zero passed bugs
     filtered_data = [
-        (mod, gen, val, pas)
-        for mod, gen, val, pas in zip(
-            modifiers_display, generated_counts, validated_counts, passed_counts
+        (mod, gen, val, pas, tim)
+        for mod, gen, val, pas, tim in zip(
+            modifiers_display, generated_counts, validated_counts, passed_counts, timeout_counts
         )
         if pas > 0
     ]
@@ -301,7 +317,7 @@ def plot_bug_distribution(analysis: Dict[str, Any], output_path: str, show_gener
         return
 
     # Unpack filtered data
-    modifiers_display, generated_counts, validated_counts, passed_counts = zip(
+    modifiers_display, generated_counts, validated_counts, passed_counts, timeout_counts = zip(
         *filtered_data
     )
 
@@ -344,6 +360,20 @@ def plot_bug_distribution(analysis: Dict[str, Any], output_path: str, show_gener
             edgecolor="none",
             zorder=3,
         )
+        # Timeout bars stacked on top of validated (dotted pattern)
+        if show_timeout_bugs:
+            bars3 = ax.bar(
+                x,
+                timeout_counts,
+                width,
+                bottom=validated_counts,
+                label="Timeout",
+                color="gray",
+                edgecolor="black",
+                linewidth=0,
+                hatch="...",
+                zorder=4,
+            )
     else:
         # Back: Validated (light grey)
         bars1 = ax.bar(
@@ -365,6 +395,20 @@ def plot_bug_distribution(analysis: Dict[str, Any], output_path: str, show_gener
             edgecolor="none",
             zorder=2,
         )
+        # Timeout bars stacked on top of validated (dotted pattern)
+        if show_timeout_bugs:
+            bars3 = ax.bar(
+                x,
+                timeout_counts,
+                width,
+                bottom=validated_counts,
+                label="Timeout",
+                color="lightgrey",
+                edgecolor="black",
+                linewidth=0,
+                hatch="...",
+                zorder=3,
+            )
 
     # Customize plot
     ax.set_xlabel("Modifier Type", fontsize=22, fontweight="bold")
@@ -380,7 +424,7 @@ def plot_bug_distribution(analysis: Dict[str, Any], output_path: str, show_gener
 
     # Add value labels on bars
     if show_generated_bugs:
-        for i, (gen, val, pas) in enumerate(zip(generated_counts, validated_counts, passed_counts)):
+        for i, (gen, val, pas, tim) in enumerate(zip(generated_counts, validated_counts, passed_counts, timeout_counts)):
             # Label for generated (at the top of generated bar)
             ax.text(
                 x[i],
@@ -393,16 +437,17 @@ def plot_bug_distribution(analysis: Dict[str, Any], output_path: str, show_gener
                 color="dimgrey",
             )
             # Label for validated (at the top of validated bar)
-            ax.text(
-                x[i],
-                val,
-                f"{int(val)}",
-                ha="center",
-                va="bottom",
-                fontsize=16,
-                fontweight="bold",
-                color="dimgrey",
-            )
+            if not show_timeout_bugs:
+                ax.text(
+                    x[i],
+                    val,
+                    f"{int(val)}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=16,
+                    fontweight="bold",
+                    color="dimgrey",
+                )
             # Label for passed (at the top of passed bar)
             ax.text(
                 x[i],
@@ -414,19 +459,32 @@ def plot_bug_distribution(analysis: Dict[str, Any], output_path: str, show_gener
                 fontweight="bold",
                 color="white",
             )
+            # Label for timeout (at the top of timeout bar)
+            if show_timeout_bugs and tim > 0:
+                ax.text(
+                    x[i],
+                    val + tim,
+                    f"{int(tim)}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=16,
+                    fontweight="bold",
+                    color="dimgrey",
+                )
     else:
-        for i, (val, pas) in enumerate(zip(validated_counts, passed_counts)):
+        for i, (val, pas, tim) in enumerate(zip(validated_counts, passed_counts, timeout_counts)):
             # Label for validated (at the top of validated bar)
-            ax.text(
-                x[i],
-                val,
-                f"{int(val)}",
-                ha="center",
-                va="bottom",
-                fontsize=16,
-                fontweight="bold",
-                color="dimgrey",
-            )
+            if not show_timeout_bugs:
+                ax.text(
+                    x[i],
+                    val,
+                    f"{int(val)}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=16,
+                    fontweight="bold",
+                    color="dimgrey",
+                )
             # Label for passed (at the top of passed bar)
             ax.text(
                 x[i],
@@ -438,6 +496,18 @@ def plot_bug_distribution(analysis: Dict[str, Any], output_path: str, show_gener
                 fontweight="bold",
                 color="black",
             )
+            # Label for timeout (at the top of timeout bar)
+            if show_timeout_bugs and tim > 0:
+                ax.text(
+                    x[i],
+                    val + tim,
+                    f"{int(tim)}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=16,
+                    fontweight="bold",
+                    color="dimgrey",
+                )
 
     # Tight layout to prevent label cutoff
     plt.tight_layout()
@@ -479,6 +549,7 @@ def print_aggregate_statistics(all_analyses: list[Dict[str, Any]]) -> None:
     total_validated = sum(a["total_validated"] for a in all_analyses)
     total_passed = sum(a["total_passed"] for a in all_analyses)
     total_failed = sum(a["total_failed"] for a in all_analyses)
+    total_timeouts = sum(a.get("total_timeouts", 0) for a in all_analyses)
 
     # Aggregate by modifier across all repos
     modifier_stats = defaultdict(
@@ -487,6 +558,7 @@ def print_aggregate_statistics(all_analyses: list[Dict[str, Any]]) -> None:
             "validated": 0,
             "passed": 0,
             "failed": 0,
+            "timeout": 0,
             "f2p_counts": [],
             "p2p_counts": [],
         }
@@ -502,6 +574,9 @@ def print_aggregate_statistics(all_analyses: list[Dict[str, Any]]) -> None:
             modifier_stats[modifier]["failed"] += data["failed"]
             modifier_stats[modifier]["f2p_counts"].extend(data["f2p_counts"])
             modifier_stats[modifier]["p2p_counts"].extend(data["p2p_counts"])
+        
+        for modifier, count in analysis.get("timeout_by_modifier", {}).items():
+            modifier_stats[modifier]["timeout"] += count
 
     print("\n")
     print("=" * 80)
@@ -594,6 +669,12 @@ def main():
         default=False,
         help="Show generated bugs as another bar behind validated and passed. If enabled, validated bar shows in grey and generated in light grey.",
     )
+    parser.add_argument(
+        "--show-timeout-bugs",
+        action="store_true",
+        default=False,
+        help="Show timeout bugs as a dotted bar stacked on top of validated bugs.",
+    )
 
     args = parser.parse_args()
 
@@ -611,7 +692,7 @@ def main():
 
         # Plot bug distribution
         plot_output = Path("logs/analysis") / "bug_distribution.png"
-        plot_bug_distribution(analysis, str(plot_output), args.show_generated_bugs)
+        plot_bug_distribution(analysis, str(plot_output), args.show_generated_bugs, args.show_timeout_bugs)
     else:
         # Analyze all repos
         repos = discover_repos()
@@ -649,6 +730,7 @@ def main():
             total_validated = sum(a["total_validated"] for a in all_analyses)
             total_passed = sum(a["total_passed"] for a in all_analyses)
             total_failed = sum(a["total_failed"] for a in all_analyses)
+            total_timeouts = sum(a.get("total_timeouts", 0) for a in all_analyses)
 
             modifier_stats = defaultdict(
                 lambda: {
@@ -656,6 +738,7 @@ def main():
                     "validated": 0,
                     "passed": 0,
                     "failed": 0,
+                    "timeout": 0,
                     "f2p_counts": [],
                     "p2p_counts": [],
                 }
@@ -671,6 +754,9 @@ def main():
                     modifier_stats[modifier]["failed"] += data["failed"]
                     modifier_stats[modifier]["f2p_counts"].extend(data["f2p_counts"])
                     modifier_stats[modifier]["p2p_counts"].extend(data["p2p_counts"])
+                
+                for modifier, count in analysis.get("timeout_by_modifier", {}).items():
+                    modifier_stats[modifier]["timeout"] += count
 
             # Calculate summary statistics for each modifier
             modifier_summaries = {}
@@ -680,6 +766,7 @@ def main():
                     "validated": stats["validated"],
                     "passed": stats["passed"],
                     "failed": stats["failed"],
+                    "timeout": stats["timeout"],
                     "pass_rate": (stats["passed"] / max(stats["validated"], 1)) * 100,
                 }
 
@@ -703,6 +790,7 @@ def main():
                     "total_validated": total_validated,
                     "total_passed": total_passed,
                     "total_failed": total_failed,
+                    "total_timeouts": total_timeouts,
                     "pass_rate": (total_passed / max(total_validated, 1)) * 100,
                     "by_modifier": modifier_summaries,
                 },
@@ -712,7 +800,7 @@ def main():
 
             # Plot aggregate bug distribution
             plot_output = Path("logs/analysis") / "bug_distribution.png"
-            plot_bug_distribution(aggregate_data, str(plot_output), args.show_generated_bugs)
+            plot_bug_distribution(aggregate_data, str(plot_output), args.show_generated_bugs, args.show_timeout_bugs)
 
 
 if __name__ == "__main__":
