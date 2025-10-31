@@ -601,7 +601,7 @@ def plot_per_repo_distribution(
     # Create grouped bars
     ax.bar(x - width, validated, width, label="Validated", color="lightgrey")
     ax.bar(x, passed, width, label="Passed", color="black")
-    ax.bar(x + width, timeout, width, label="Timeout", color="gray", hatch="...")
+    ax.bar(x + width, timeout, width, label="Timeout", color="lightgrey", hatch="...")
 
     # Customize plot
     ax.set_xlabel("Repository", fontsize=22, fontweight="bold")
