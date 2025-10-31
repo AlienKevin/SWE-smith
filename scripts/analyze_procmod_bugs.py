@@ -543,6 +543,68 @@ def plot_bug_distribution(analysis: Dict[str, Any], output_path: str, show_gener
     print(f"Bug distribution plot saved to: {output_path}")
 
 
+def plot_per_repo_distribution(all_analyses: list[Dict[str, Any]], output_path: str, show_repo_owner: bool = False) -> None:
+    """Plot per-repo breakdown of validated, passed, and timeout bugs.
+    
+    Args:
+        all_analyses: List of analysis results for each repo
+        output_path: Path to save the plot
+        show_repo_owner: Whether to show repo owner in labels
+    """
+    if not all_analyses:
+        print("No data to plot")
+        return
+    
+    # Extract data per repo
+    repos = [a["repo_id"] for a in all_analyses]
+    validated = [a["total_validated"] for a in all_analyses]
+    passed = [a["total_passed"] for a in all_analyses]
+    timeout = [a.get("total_timeouts", 0) for a in all_analyses]
+    
+    # Truncate commit_id from repo names (remove part after last dot)
+    repos_display = [r.rsplit(".", 1)[0] for r in repos]
+    
+    # Replace __ with / and optionally hide owner
+    if show_repo_owner:
+        repos_display = [r.replace("__", "/") for r in repos_display]
+    else:
+        # Hide owner (everything before and including __)
+        repos_display = [r.split("__", 1)[-1] if "__" in r else r for r in repos_display]
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=(16, 10))
+    
+    x = np.arange(len(repos))
+    width = 0.25
+    
+    # Create grouped bars
+    ax.bar(x - width, validated, width, label="Validated", color="lightgrey")
+    ax.bar(x, passed, width, label="Passed", color="black")
+    ax.bar(x + width, timeout, width, label="Timeout", color="gray", hatch="...")
+    
+    # Customize plot
+    ax.set_xlabel("Repository", fontsize=22, fontweight="bold")
+    ax.set_ylabel("Number of Bugs", fontsize=22, fontweight="bold")
+    ax.set_title("Per-Repository Bug Distribution", fontsize=24, fontweight="bold", pad=20)
+    ax.set_xticks(x)
+    ax.set_xticklabels(repos_display, rotation=45, ha="right", fontsize=14)
+    ax.tick_params(axis="y", labelsize=20)
+    ax.legend(fontsize=20, loc="upper right")
+    ax.grid(axis="y", alpha=0.3, linestyle="--")
+    
+    plt.tight_layout()
+    
+    # Ensure output directory exists
+    output_dir = Path(output_path).parent
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Save plot
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+    
+    print(f"Per-repo distribution plot saved to: {output_path}")
+
+
 def discover_repos() -> list[str]:
     """Discover all repos under logs/run_validation.
 
@@ -695,6 +757,12 @@ def main():
         default=False,
         help="Show timeout bugs as a dotted bar stacked on top of validated bugs.",
     )
+    parser.add_argument(
+        "--show-repo-owner",
+        action="store_true",
+        default=False,
+        help="Show repository owner in per-repo plot labels.",
+    )
 
     args = parser.parse_args()
 
@@ -821,6 +889,10 @@ def main():
             # Plot aggregate bug distribution
             plot_output = Path("logs/analysis") / "bug_distribution.png"
             plot_bug_distribution(aggregate_data, str(plot_output), args.show_generated_bugs, args.show_timeout_bugs)
+            
+            # Plot per-repo distribution
+            per_repo_output = Path("logs/analysis") / "per_repo_bug_distribution.png"
+            plot_per_repo_distribution(all_analyses, str(per_repo_output), args.show_repo_owner)
 
 
 if __name__ == "__main__":
