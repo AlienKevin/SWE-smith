@@ -70,7 +70,6 @@ def analyze_bugs(repo_id: str) -> Dict[str, Any]:
                 total_generated += 1
                 modifier_name = file.split("bug__")[1].split("__")[0]
                 instance_id = f"{repo_id}.{file.split('bug__')[1].replace('.diff', '')}"
-                # print(f'Generated bug: {instance_id}')
                 generated_bugs[modifier_name].append(instance_id)
 
     generated_bugs_len = sum(len(v) for v in generated_bugs.values())
@@ -92,9 +91,6 @@ def analyze_bugs(repo_id: str) -> Dict[str, Any]:
     total_validated = 0
     total_passed = 0
     total_failed = 0
-
-    print(f"{len(os.listdir(validation_dir))=}")
-    print(f"{total_generated=}")
 
     if validation_dir.exists():
         for instance_dir in os.listdir(validation_dir):
@@ -149,29 +145,6 @@ def analyze_bugs(repo_id: str) -> Dict[str, Any]:
             if not instance_path.exists():
                 print(f"Timeout bug from missing validation folder: {bug_id}")
                 timeout_bugs[modifier_name].append(bug_id)
-    timeout_bugs_len = sum(len(v) for v in timeout_bugs.values())
-
-    gen_bugs = [bug for bugs in generated_bugs.values() for bug in bugs]
-    val_bugs = os.listdir(validation_dir)
-    print(f'{gen_bugs=}')
-    print(f'{val_bugs=}')
-    duplicated_gen_bugs = [bug for bug in gen_bugs if gen_bugs.count(bug) > 1]
-    if duplicated_gen_bugs:
-        print(f"Duplicated generated bugs: {set(duplicated_gen_bugs)}")
-    # assert len(gen_bugs) == len(set(gen_bugs))
-    
-    assert len(val_bugs) == len(set(val_bugs))
-    missing_bugs1 = list(set(gen_bugs) - set(val_bugs))
-    missing_bugs2 = list(set(val_bugs) - set(gen_bugs))
-    print(len(missing_bugs1))
-    print(len(missing_bugs2))
-    for bug2 in missing_bugs2:
-        print(bug2)
-
-    print(f'{total_validated=}')
-    print(f"Total timeouts: {total_timeouts}")
-    print(f"Timeout bugs: {timeout_bugs_len}")
-    assert total_timeouts == timeout_bugs_len
 
     return {
         "repo_id": repo_id,
@@ -511,7 +484,7 @@ def plot_bug_distribution(analysis: Dict[str, Any], output_path: str, show_gener
                 ax.text(
                     x[i],
                     val + tim,
-                    f"{int(tim)}",
+                    f"{int(gen)}",
                     ha="center",
                     va="bottom",
                     fontsize=16,
@@ -519,7 +492,7 @@ def plot_bug_distribution(analysis: Dict[str, Any], output_path: str, show_gener
                     color="dimgrey",
                 )
     else:
-        for i, (val, pas, tim) in enumerate(zip(validated_counts, passed_counts, timeout_counts)):
+        for i, (gen, val, pas, tim) in enumerate(zip(generated_counts, validated_counts, passed_counts, timeout_counts)):
             # Label for validated (at the top of validated bar)
             if not show_timeout_bugs:
                 ax.text(
@@ -548,7 +521,7 @@ def plot_bug_distribution(analysis: Dict[str, Any], output_path: str, show_gener
                 ax.text(
                     x[i],
                     val + tim,
-                    f"{int(tim)}",
+                    f"{int(gen)}",
                     ha="center",
                     va="bottom",
                     fontsize=16,
