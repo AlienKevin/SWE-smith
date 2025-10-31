@@ -60,14 +60,16 @@ def extract_test_count(repo_id: str) -> int:
     Returns:
         Total number of tests, or 0 if test_output.txt not found
     """
-    test_output_path = Path("logs/run_validation") / repo_id / f"{repo_id}.ref" / "test_output.txt"
-    
+    test_output_path = (
+        Path("logs/run_validation") / repo_id / f"{repo_id}.ref" / "test_output.txt"
+    )
+
     if not test_output_path.exists():
         return 0
-    
+
     total_tests = 0
     pattern = re.compile(r"test result: ok\. (\d+) passed")
-    
+
     try:
         with open(test_output_path, "r") as f:
             for line in f:
@@ -77,7 +79,7 @@ def extract_test_count(repo_id: str) -> int:
     except Exception as e:
         print(f"Warning: Could not read test output for {repo_id}: {e}")
         return 0
-    
+
     return total_tests
 
 
@@ -669,57 +671,58 @@ def plot_per_repo_distribution(
 
 def get_repo_info(owner: str, repo: str) -> dict:
     """Get repository info from GitHub API using curl.
-    
+
     Args:
         owner: Repository owner
         repo: Repository name
-        
+
     Returns:
         Dictionary with 'size' (in KB) and 'stars' (stargazers_count), or empty dict if request fails
     """
     url = f"https://api.github.com/repos/{owner}/{repo}"
-    
+
     # Build curl command with authentication if GITHUB_TOKEN is available
     curl_cmd = ["curl", "-s"]
-    
+
     # Check for GITHUB_TOKEN environment variable
     github_token = os.environ.get("GITHUB_TOKEN")
     if github_token:
         curl_cmd.extend(["-H", f"Authorization: Bearer {github_token}"])
-    
+
     curl_cmd.extend(["-H", "Accept: application/vnd.github+json"])
     curl_cmd.append(url)
-    
+
     try:
-        result = subprocess.run(
-            curl_cmd,
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-        
+        result = subprocess.run(curl_cmd, capture_output=True, text=True, timeout=10)
+
         if result.returncode == 0 and result.stdout.strip():
             try:
                 data = json.loads(result.stdout)
-                
+
                 # Check for GitHub API errors (rate limit, not found, etc.)
                 if "message" in data:
                     if "rate limit" in data["message"].lower():
-                        print(f"Warning: GitHub API rate limit exceeded. Message: {data['message']}")
+                        print(
+                            f"Warning: GitHub API rate limit exceeded. Message: {data['message']}"
+                        )
                     else:
-                        print(f"Warning: GitHub API error for {owner}/{repo}: {data['message']}")
+                        print(
+                            f"Warning: GitHub API error for {owner}/{repo}: {data['message']}"
+                        )
                     return {}
-                
+
                 # Successfully got data
                 return {
                     "size": data.get("size", 0),
-                    "stars": data.get("stargazers_count", 0)
+                    "stars": data.get("stargazers_count", 0),
                 }
             except json.JSONDecodeError as e:
                 print(f"Warning: Failed to parse JSON response for {owner}/{repo}: {e}")
                 return {}
         else:
-            print(f"Warning: Failed to get repo info for {owner}/{repo} (curl returned {result.returncode})")
+            print(
+                f"Warning: Failed to get repo info for {owner}/{repo} (curl returned {result.returncode})"
+            )
             return {}
     except Exception as e:
         print(f"Warning: Error getting repo info for {owner}/{repo}: {e}")
@@ -756,7 +759,7 @@ def plot_timeout_vs_tests_correlation(
         timeout_pct = (total_timeouts / total_generated) * 100
         test_counts.append(test_count)
         timeout_percentages.append(timeout_pct)
-        
+
         # Truncate commit_id from repo name
         repo_name = analysis["repo_id"].rsplit(".", 1)[0]
         # Hide owner (everything before and including __)
@@ -795,14 +798,23 @@ def plot_timeout_vs_tests_correlation(
     fig, ax = plt.subplots(figsize=(12, 8))
 
     # Scatter plot for non-outliers only
-    ax.scatter(test_counts_filtered, timeout_percentages_filtered, alpha=0.6, s=100, color="black", label="Data")
-    
+    ax.scatter(
+        test_counts_filtered,
+        timeout_percentages_filtered,
+        alpha=0.6,
+        s=100,
+        color="black",
+        label="Data",
+    )
+
     # Print outliers if any (but don't plot them)
     if len(outliers_x) > 0:
         print(f"\nExcluded {len(outliers_x)} outlier(s) from correlation analysis:")
         outlier_repos = repo_names[~mask]
-        for i, (repo, tests, timeout_pct) in enumerate(zip(outlier_repos, outliers_x, outliers_y)):
-            print(f"  {i+1}. {repo}: {int(tests)} tests, {timeout_pct:.1f}% timeout")
+        for i, (repo, tests, timeout_pct) in enumerate(
+            zip(outlier_repos, outliers_x, outliers_y)
+        ):
+            print(f"  {i + 1}. {repo}: {int(tests)} tests, {timeout_pct:.1f}% timeout")
         print()
 
     # Add linear regression line using filtered data
@@ -810,12 +822,22 @@ def plot_timeout_vs_tests_correlation(
         z = np.polyfit(test_counts_filtered, timeout_percentages_filtered, 1)
         p = np.poly1d(z)
         x_line = np.linspace(min(test_counts_filtered), max(test_counts_filtered), 100)
-        ax.plot(x_line, p(x_line), "r--", alpha=0.8, linewidth=2, label=f"y={z[0]:.4f}x+{z[1]:.2f}")
+        ax.plot(
+            x_line,
+            p(x_line),
+            "r--",
+            alpha=0.8,
+            linewidth=2,
+            label=f"y={z[0]:.4f}x+{z[1]:.2f}",
+        )
 
         # Calculate correlation coefficient on filtered data
-        correlation = np.corrcoef(test_counts_filtered, timeout_percentages_filtered)[0, 1]
+        correlation = np.corrcoef(test_counts_filtered, timeout_percentages_filtered)[
+            0, 1
+        ]
         ax.text(
-            0.05, 0.95,
+            0.05,
+            0.95,
             f"Correlation: {correlation:.3f}",
             transform=ax.transAxes,
             fontsize=16,
@@ -871,9 +893,13 @@ def plot_num_tests_repo_size_correlation(
     if github_token:
         print("\nFetching repository sizes from GitHub API (authenticated)...")
     else:
-        print("\nFetching repository sizes from GitHub API (unauthenticated - rate limited to 60 requests/hour)...")
-        print("Tip: Set GITHUB_TOKEN environment variable to increase rate limit to 5000 requests/hour")
-    
+        print(
+            "\nFetching repository sizes from GitHub API (unauthenticated - rate limited to 60 requests/hour)..."
+        )
+        print(
+            "Tip: Set GITHUB_TOKEN environment variable to increase rate limit to 5000 requests/hour"
+        )
+
     for analysis in all_analyses:
         test_count = analysis.get("test_count", 0)
         repo_id = analysis["repo_id"]
@@ -887,16 +913,16 @@ def plot_num_tests_repo_size_correlation(
         repo_full = repo_id.rsplit(".", 1)[0]  # Remove commit hash
         if "__" in repo_full:
             owner, repo = repo_full.split("__", 1)
-            
+
             # Get repo info from GitHub API
             repo_info = get_repo_info(owner, repo)
             repo_size = repo_info.get("size", 0)
-            
+
             if repo_size > 0:
                 test_counts.append(test_count)
                 repo_sizes.append(repo_size)
                 repo_names.append(repo)
-                
+
             # Small delay to avoid rate limiting
             time.sleep(0.1)
 
@@ -934,14 +960,23 @@ def plot_num_tests_repo_size_correlation(
     fig, ax = plt.subplots(figsize=(12, 8))
 
     # Scatter plot for non-outliers only
-    ax.scatter(repo_sizes_filtered, test_counts_filtered, alpha=0.6, s=100, color="black", label="Data")
-    
+    ax.scatter(
+        repo_sizes_filtered,
+        test_counts_filtered,
+        alpha=0.6,
+        s=100,
+        color="black",
+        label="Data",
+    )
+
     # Print outliers if any (but don't plot them)
     if len(outliers_x) > 0:
         print(f"Excluded {len(outliers_x)} outlier(s) from correlation analysis:")
         outlier_repos = repo_names[~mask]
-        for i, (repo, size, tests) in enumerate(zip(outlier_repos, outliers_x, outliers_y)):
-            print(f"  {i+1}. {repo}: {int(size)} KB, {int(tests)} tests")
+        for i, (repo, size, tests) in enumerate(
+            zip(outlier_repos, outliers_x, outliers_y)
+        ):
+            print(f"  {i + 1}. {repo}: {int(size)} KB, {int(tests)} tests")
         print()
 
     # Add linear regression line using filtered data
@@ -949,12 +984,20 @@ def plot_num_tests_repo_size_correlation(
         z = np.polyfit(repo_sizes_filtered, test_counts_filtered, 1)
         p = np.poly1d(z)
         x_line = np.linspace(min(repo_sizes_filtered), max(repo_sizes_filtered), 100)
-        ax.plot(x_line, p(x_line), "r--", alpha=0.8, linewidth=2, label=f"y={z[0]:.4f}x+{z[1]:.2f}")
+        ax.plot(
+            x_line,
+            p(x_line),
+            "r--",
+            alpha=0.8,
+            linewidth=2,
+            label=f"y={z[0]:.4f}x+{z[1]:.2f}",
+        )
 
         # Calculate correlation coefficient on filtered data
         correlation = np.corrcoef(repo_sizes_filtered, test_counts_filtered)[0, 1]
         ax.text(
-            0.05, 0.95,
+            0.05,
+            0.95,
             f"Correlation: {correlation:.3f}",
             transform=ax.transAxes,
             fontsize=16,
@@ -1010,9 +1053,13 @@ def plot_num_tests_repo_star_correlation(
     if github_token:
         print("\nFetching repository stars from GitHub API (authenticated)...")
     else:
-        print("\nFetching repository stars from GitHub API (unauthenticated - rate limited to 60 requests/hour)...")
-        print("Tip: Set GITHUB_TOKEN environment variable to increase rate limit to 5000 requests/hour")
-    
+        print(
+            "\nFetching repository stars from GitHub API (unauthenticated - rate limited to 60 requests/hour)..."
+        )
+        print(
+            "Tip: Set GITHUB_TOKEN environment variable to increase rate limit to 5000 requests/hour"
+        )
+
     for analysis in all_analyses:
         test_count = analysis.get("test_count", 0)
         repo_id = analysis["repo_id"]
@@ -1026,16 +1073,16 @@ def plot_num_tests_repo_star_correlation(
         repo_full = repo_id.rsplit(".", 1)[0]  # Remove commit hash
         if "__" in repo_full:
             owner, repo = repo_full.split("__", 1)
-            
+
             # Get repo info from GitHub API
             repo_info = get_repo_info(owner, repo)
             stars = repo_info.get("stars", 0)
-            
+
             if stars > 0:
                 test_counts.append(test_count)
                 repo_stars.append(stars)
                 repo_names.append(repo)
-                
+
             # Small delay to avoid rate limiting
             time.sleep(0.1)
 
@@ -1073,14 +1120,23 @@ def plot_num_tests_repo_star_correlation(
     fig, ax = plt.subplots(figsize=(12, 8))
 
     # Scatter plot for non-outliers only
-    ax.scatter(repo_stars_filtered, test_counts_filtered, alpha=0.6, s=100, color="black", label="Data")
-    
+    ax.scatter(
+        repo_stars_filtered,
+        test_counts_filtered,
+        alpha=0.6,
+        s=100,
+        color="black",
+        label="Data",
+    )
+
     # Print outliers if any (but don't plot them)
     if len(outliers_x) > 0:
         print(f"Excluded {len(outliers_x)} outlier(s) from correlation analysis:")
         outlier_repos = repo_names[~mask]
-        for i, (repo, stars, tests) in enumerate(zip(outlier_repos, outliers_x, outliers_y)):
-            print(f"  {i+1}. {repo}: {int(stars)} stars, {int(tests)} tests")
+        for i, (repo, stars, tests) in enumerate(
+            zip(outlier_repos, outliers_x, outliers_y)
+        ):
+            print(f"  {i + 1}. {repo}: {int(stars)} stars, {int(tests)} tests")
         print()
 
     # Add linear regression line using filtered data
@@ -1088,12 +1144,20 @@ def plot_num_tests_repo_star_correlation(
         z = np.polyfit(repo_stars_filtered, test_counts_filtered, 1)
         p = np.poly1d(z)
         x_line = np.linspace(min(repo_stars_filtered), max(repo_stars_filtered), 100)
-        ax.plot(x_line, p(x_line), "r--", alpha=0.8, linewidth=2, label=f"y={z[0]:.4f}x+{z[1]:.2f}")
+        ax.plot(
+            x_line,
+            p(x_line),
+            "r--",
+            alpha=0.8,
+            linewidth=2,
+            label=f"y={z[0]:.4f}x+{z[1]:.2f}",
+        )
 
         # Calculate correlation coefficient on filtered data
         correlation = np.corrcoef(repo_stars_filtered, test_counts_filtered)[0, 1]
         ax.text(
-            0.05, 0.95,
+            0.05,
+            0.95,
             f"Correlation: {correlation:.3f}",
             transform=ax.transAxes,
             fontsize=16,
@@ -1426,15 +1490,21 @@ def main():
             )
 
             # Plot timeout vs tests correlation
-            correlation_output = Path("logs/analysis") / "num_tests_timeout_correlation.png"
+            correlation_output = (
+                Path("logs/analysis") / "num_tests_timeout_correlation.png"
+            )
             plot_timeout_vs_tests_correlation(all_analyses, str(correlation_output))
 
             # Plot num_tests vs repo_size correlation
-            repo_size_output = Path("logs/analysis") / "num_tests_repo_size_correlation.png"
+            repo_size_output = (
+                Path("logs/analysis") / "num_tests_repo_size_correlation.png"
+            )
             plot_num_tests_repo_size_correlation(all_analyses, str(repo_size_output))
 
             # Plot num_tests vs repo_stars correlation
-            repo_star_output = Path("logs/analysis") / "num_tests_repo_star_correlation.png"
+            repo_star_output = (
+                Path("logs/analysis") / "num_tests_repo_star_correlation.png"
+            )
             plot_num_tests_repo_star_correlation(all_analyses, str(repo_star_output))
 
 
