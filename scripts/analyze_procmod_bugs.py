@@ -23,6 +23,9 @@ Example:
 import argparse
 import json
 import os
+import re
+import subprocess
+import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict
@@ -44,6 +47,38 @@ def extract_modifier_name(instance_id: str) -> str:
         if "__" in last_part:
             return last_part.split("__")[0]
     return "unknown"
+
+
+def extract_test_count(repo_id: str) -> int:
+    """Extract total number of unit tests from test_output.txt.
+
+    Looks for lines containing 'test result: ok. X passed' and sums up all X values.
+
+    Args:
+        repo_id: Repository identifier (e.g., Instagram__MonkeyType.70c3acf6)
+
+    Returns:
+        Total number of tests, or 0 if test_output.txt not found
+    """
+    test_output_path = Path("logs/run_validation") / repo_id / f"{repo_id}.ref" / "test_output.txt"
+    
+    if not test_output_path.exists():
+        return 0
+    
+    total_tests = 0
+    pattern = re.compile(r"test result: ok\. (\d+) passed")
+    
+    try:
+        with open(test_output_path, "r") as f:
+            for line in f:
+                match = pattern.search(line)
+                if match:
+                    total_tests += int(match.group(1))
+    except Exception as e:
+        print(f"Warning: Could not read test output for {repo_id}: {e}")
+        return 0
+    
+    return total_tests
 
 
 def analyze_bugs(repo_id: str) -> Dict[str, Any]:
@@ -146,6 +181,9 @@ def analyze_bugs(repo_id: str) -> Dict[str, Any]:
                 print(f"Timeout bug from missing validation folder: {bug_id}")
                 timeout_bugs[modifier_name].append(bug_id)
 
+    # Extract test count
+    test_count = extract_test_count(repo_id)
+
     return {
         "repo_id": repo_id,
         "total_generated": total_generated,
@@ -153,6 +191,7 @@ def analyze_bugs(repo_id: str) -> Dict[str, Any]:
         "total_passed": total_passed,
         "total_failed": total_failed,
         "total_timeouts": total_timeouts,
+        "test_count": test_count,
         "generated_by_modifier": {k: len(v) for k, v in generated_bugs.items()},
         "validated_by_modifier": dict(validated_bugs),
         "timeout_by_modifier": {k: len(v) for k, v in timeout_bugs.items()},
@@ -628,6 +667,466 @@ def plot_per_repo_distribution(
     print(f"Per-repo distribution plot saved to: {output_path}")
 
 
+def get_repo_info(owner: str, repo: str) -> dict:
+    """Get repository info from GitHub API using curl.
+    
+    Args:
+        owner: Repository owner
+        repo: Repository name
+        
+    Returns:
+        Dictionary with 'size' (in KB) and 'stars' (stargazers_count), or empty dict if request fails
+    """
+    url = f"https://api.github.com/repos/{owner}/{repo}"
+    
+    # Build curl command with authentication if GITHUB_TOKEN is available
+    curl_cmd = ["curl", "-s"]
+    
+    # Check for GITHUB_TOKEN environment variable
+    github_token = os.environ.get("GITHUB_TOKEN")
+    if github_token:
+        curl_cmd.extend(["-H", f"Authorization: Bearer {github_token}"])
+    
+    curl_cmd.extend(["-H", "Accept: application/vnd.github+json"])
+    curl_cmd.append(url)
+    
+    try:
+        result = subprocess.run(
+            curl_cmd,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if result.returncode == 0 and result.stdout.strip():
+            try:
+                data = json.loads(result.stdout)
+                
+                # Check for GitHub API errors (rate limit, not found, etc.)
+                if "message" in data:
+                    if "rate limit" in data["message"].lower():
+                        print(f"Warning: GitHub API rate limit exceeded. Message: {data['message']}")
+                    else:
+                        print(f"Warning: GitHub API error for {owner}/{repo}: {data['message']}")
+                    return {}
+                
+                # Successfully got data
+                return {
+                    "size": data.get("size", 0),
+                    "stars": data.get("stargazers_count", 0)
+                }
+            except json.JSONDecodeError as e:
+                print(f"Warning: Failed to parse JSON response for {owner}/{repo}: {e}")
+                return {}
+        else:
+            print(f"Warning: Failed to get repo info for {owner}/{repo} (curl returned {result.returncode})")
+            return {}
+    except Exception as e:
+        print(f"Warning: Error getting repo info for {owner}/{repo}: {e}")
+        return {}
+
+
+def plot_timeout_vs_tests_correlation(
+    all_analyses: list[Dict[str, Any]], output_path: str
+) -> None:
+    """Plot correlation between percent of timeout bugs and total number of tests.
+
+    Args:
+        all_analyses: List of analysis results for each repo
+        output_path: Path to save the plot
+    """
+    if not all_analyses:
+        print("No data to plot")
+        return
+
+    # Extract data per repo
+    test_counts = []
+    timeout_percentages = []
+    repo_names = []
+
+    for analysis in all_analyses:
+        test_count = analysis.get("test_count", 0)
+        total_generated = analysis.get("total_generated", 0)
+        total_timeouts = analysis.get("total_timeouts", 0)
+
+        # Skip repos with no tests or no bugs
+        if test_count == 0 or total_generated == 0:
+            continue
+
+        timeout_pct = (total_timeouts / total_generated) * 100
+        test_counts.append(test_count)
+        timeout_percentages.append(timeout_pct)
+        
+        # Truncate commit_id from repo name
+        repo_name = analysis["repo_id"].rsplit(".", 1)[0]
+        # Hide owner (everything before and including __)
+        repo_name = repo_name.split("__", 1)[-1] if "__" in repo_name else repo_name
+        repo_names.append(repo_name)
+
+    if not test_counts:
+        print("No data with valid test counts to plot")
+        return
+
+    # Convert to numpy arrays for easier manipulation
+    test_counts = np.array(test_counts)
+    timeout_percentages = np.array(timeout_percentages)
+    repo_names = np.array(repo_names)
+
+    # Identify outliers using IQR method on both axes
+    q1_x, q3_x = np.percentile(test_counts, [25, 75])
+    iqr_x = q3_x - q1_x
+    lower_x, upper_x = q1_x - 1.5 * iqr_x, q3_x + 1.5 * iqr_x
+
+    q1_y, q3_y = np.percentile(timeout_percentages, [25, 75])
+    iqr_y = q3_y - q1_y
+    lower_y, upper_y = q1_y - 1.5 * iqr_y, q3_y + 1.5 * iqr_y
+
+    # Create mask for non-outliers
+    mask_x = (test_counts >= lower_x) & (test_counts <= upper_x)
+    mask_y = (timeout_percentages >= lower_y) & (timeout_percentages <= upper_y)
+    mask = mask_x & mask_y
+
+    test_counts_filtered = test_counts[mask]
+    timeout_percentages_filtered = timeout_percentages[mask]
+    outliers_x = test_counts[~mask]
+    outliers_y = timeout_percentages[~mask]
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    # Scatter plot for non-outliers only
+    ax.scatter(test_counts_filtered, timeout_percentages_filtered, alpha=0.6, s=100, color="black", label="Data")
+    
+    # Print outliers if any (but don't plot them)
+    if len(outliers_x) > 0:
+        print(f"\nExcluded {len(outliers_x)} outlier(s) from correlation analysis:")
+        outlier_repos = repo_names[~mask]
+        for i, (repo, tests, timeout_pct) in enumerate(zip(outlier_repos, outliers_x, outliers_y)):
+            print(f"  {i+1}. {repo}: {int(tests)} tests, {timeout_pct:.1f}% timeout")
+        print()
+
+    # Add linear regression line using filtered data
+    if len(test_counts_filtered) > 1:
+        z = np.polyfit(test_counts_filtered, timeout_percentages_filtered, 1)
+        p = np.poly1d(z)
+        x_line = np.linspace(min(test_counts_filtered), max(test_counts_filtered), 100)
+        ax.plot(x_line, p(x_line), "r--", alpha=0.8, linewidth=2, label=f"y={z[0]:.4f}x+{z[1]:.2f}")
+
+        # Calculate correlation coefficient on filtered data
+        correlation = np.corrcoef(test_counts_filtered, timeout_percentages_filtered)[0, 1]
+        ax.text(
+            0.05, 0.95,
+            f"Correlation: {correlation:.3f}",
+            transform=ax.transAxes,
+            fontsize=16,
+            verticalalignment="top",
+            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+        )
+
+    # Customize plot
+    ax.set_xlabel("Total Number of Unit Tests", fontsize=18, fontweight="bold")
+    ax.set_ylabel("Timeout Bugs (%)", fontsize=18, fontweight="bold")
+    ax.set_title(
+        "Correlation: Timeout Bugs vs Number of Tests",
+        fontsize=20,
+        fontweight="bold",
+        pad=20,
+    )
+    ax.tick_params(axis="both", labelsize=14)
+    ax.grid(alpha=0.3, linestyle="--")
+    ax.legend(fontsize=14, loc="upper right")
+
+    plt.tight_layout()
+
+    # Ensure output directory exists
+    output_dir = Path(output_path).parent
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save plot
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+    print(f"Timeout vs tests correlation plot saved to: {output_path}")
+
+
+def plot_num_tests_repo_size_correlation(
+    all_analyses: list[Dict[str, Any]], output_path: str
+) -> None:
+    """Plot correlation between number of tests and repository size.
+
+    Args:
+        all_analyses: List of analysis results for each repo
+        output_path: Path to save the plot
+    """
+    if not all_analyses:
+        print("No data to plot")
+        return
+
+    # Extract data per repo
+    test_counts = []
+    repo_sizes = []
+    repo_names = []
+
+    github_token = os.environ.get("GITHUB_TOKEN")
+    if github_token:
+        print("\nFetching repository sizes from GitHub API (authenticated)...")
+    else:
+        print("\nFetching repository sizes from GitHub API (unauthenticated - rate limited to 60 requests/hour)...")
+        print("Tip: Set GITHUB_TOKEN environment variable to increase rate limit to 5000 requests/hour")
+    
+    for analysis in all_analyses:
+        test_count = analysis.get("test_count", 0)
+        repo_id = analysis["repo_id"]
+
+        # Skip repos with no tests
+        if test_count == 0:
+            continue
+
+        # Parse repo_id to extract owner and repo name
+        # Format: owner__repo.commit_hash
+        repo_full = repo_id.rsplit(".", 1)[0]  # Remove commit hash
+        if "__" in repo_full:
+            owner, repo = repo_full.split("__", 1)
+            
+            # Get repo info from GitHub API
+            repo_info = get_repo_info(owner, repo)
+            repo_size = repo_info.get("size", 0)
+            
+            if repo_size > 0:
+                test_counts.append(test_count)
+                repo_sizes.append(repo_size)
+                repo_names.append(repo)
+                
+            # Small delay to avoid rate limiting
+            time.sleep(0.1)
+
+    if not test_counts:
+        print("No data with valid test counts and repo sizes to plot")
+        return
+
+    print(f"Successfully fetched sizes for {len(test_counts)} repositories\n")
+
+    # Convert to numpy arrays for easier manipulation
+    test_counts = np.array(test_counts)
+    repo_sizes = np.array(repo_sizes)
+    repo_names = np.array(repo_names)
+
+    # Identify outliers using IQR method on both axes
+    q1_x, q3_x = np.percentile(repo_sizes, [25, 75])
+    iqr_x = q3_x - q1_x
+    lower_x, upper_x = q1_x - 1.5 * iqr_x, q3_x + 1.5 * iqr_x
+
+    q1_y, q3_y = np.percentile(test_counts, [25, 75])
+    iqr_y = q3_y - q1_y
+    lower_y, upper_y = q1_y - 1.5 * iqr_y, q3_y + 1.5 * iqr_y
+
+    # Create mask for non-outliers
+    mask_x = (repo_sizes >= lower_x) & (repo_sizes <= upper_x)
+    mask_y = (test_counts >= lower_y) & (test_counts <= upper_y)
+    mask = mask_x & mask_y
+
+    repo_sizes_filtered = repo_sizes[mask]
+    test_counts_filtered = test_counts[mask]
+    outliers_x = repo_sizes[~mask]
+    outliers_y = test_counts[~mask]
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    # Scatter plot for non-outliers only
+    ax.scatter(repo_sizes_filtered, test_counts_filtered, alpha=0.6, s=100, color="black", label="Data")
+    
+    # Print outliers if any (but don't plot them)
+    if len(outliers_x) > 0:
+        print(f"Excluded {len(outliers_x)} outlier(s) from correlation analysis:")
+        outlier_repos = repo_names[~mask]
+        for i, (repo, size, tests) in enumerate(zip(outlier_repos, outliers_x, outliers_y)):
+            print(f"  {i+1}. {repo}: {int(size)} KB, {int(tests)} tests")
+        print()
+
+    # Add linear regression line using filtered data
+    if len(repo_sizes_filtered) > 1:
+        z = np.polyfit(repo_sizes_filtered, test_counts_filtered, 1)
+        p = np.poly1d(z)
+        x_line = np.linspace(min(repo_sizes_filtered), max(repo_sizes_filtered), 100)
+        ax.plot(x_line, p(x_line), "r--", alpha=0.8, linewidth=2, label=f"y={z[0]:.4f}x+{z[1]:.2f}")
+
+        # Calculate correlation coefficient on filtered data
+        correlation = np.corrcoef(repo_sizes_filtered, test_counts_filtered)[0, 1]
+        ax.text(
+            0.05, 0.95,
+            f"Correlation: {correlation:.3f}",
+            transform=ax.transAxes,
+            fontsize=16,
+            verticalalignment="top",
+            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+        )
+
+    # Customize plot
+    ax.set_xlabel("Repository Size (KB)", fontsize=18, fontweight="bold")
+    ax.set_ylabel("Total Number of Unit Tests", fontsize=18, fontweight="bold")
+    ax.set_title(
+        "Correlation: Number of Tests vs Repository Size",
+        fontsize=20,
+        fontweight="bold",
+        pad=20,
+    )
+    ax.tick_params(axis="both", labelsize=14)
+    ax.grid(alpha=0.3, linestyle="--")
+    ax.legend(fontsize=14, loc="upper right")
+
+    plt.tight_layout()
+
+    # Ensure output directory exists
+    output_dir = Path(output_path).parent
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save plot
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+    print(f"Number of tests vs repo size correlation plot saved to: {output_path}")
+
+
+def plot_num_tests_repo_star_correlation(
+    all_analyses: list[Dict[str, Any]], output_path: str
+) -> None:
+    """Plot correlation between number of tests and repository stars.
+
+    Args:
+        all_analyses: List of analysis results for each repo
+        output_path: Path to save the plot
+    """
+    if not all_analyses:
+        print("No data to plot")
+        return
+
+    # Extract data per repo
+    test_counts = []
+    repo_stars = []
+    repo_names = []
+
+    github_token = os.environ.get("GITHUB_TOKEN")
+    if github_token:
+        print("\nFetching repository stars from GitHub API (authenticated)...")
+    else:
+        print("\nFetching repository stars from GitHub API (unauthenticated - rate limited to 60 requests/hour)...")
+        print("Tip: Set GITHUB_TOKEN environment variable to increase rate limit to 5000 requests/hour")
+    
+    for analysis in all_analyses:
+        test_count = analysis.get("test_count", 0)
+        repo_id = analysis["repo_id"]
+
+        # Skip repos with no tests
+        if test_count == 0:
+            continue
+
+        # Parse repo_id to extract owner and repo name
+        # Format: owner__repo.commit_hash
+        repo_full = repo_id.rsplit(".", 1)[0]  # Remove commit hash
+        if "__" in repo_full:
+            owner, repo = repo_full.split("__", 1)
+            
+            # Get repo info from GitHub API
+            repo_info = get_repo_info(owner, repo)
+            stars = repo_info.get("stars", 0)
+            
+            if stars > 0:
+                test_counts.append(test_count)
+                repo_stars.append(stars)
+                repo_names.append(repo)
+                
+            # Small delay to avoid rate limiting
+            time.sleep(0.1)
+
+    if not test_counts:
+        print("No data with valid test counts and repo stars to plot")
+        return
+
+    print(f"Successfully fetched stars for {len(test_counts)} repositories\n")
+
+    # Convert to numpy arrays for easier manipulation
+    test_counts = np.array(test_counts)
+    repo_stars = np.array(repo_stars)
+    repo_names = np.array(repo_names)
+
+    # Identify outliers using IQR method on both axes
+    q1_x, q3_x = np.percentile(repo_stars, [25, 75])
+    iqr_x = q3_x - q1_x
+    lower_x, upper_x = q1_x - 1.5 * iqr_x, q3_x + 1.5 * iqr_x
+
+    q1_y, q3_y = np.percentile(test_counts, [25, 75])
+    iqr_y = q3_y - q1_y
+    lower_y, upper_y = q1_y - 1.5 * iqr_y, q3_y + 1.5 * iqr_y
+
+    # Create mask for non-outliers
+    mask_x = (repo_stars >= lower_x) & (repo_stars <= upper_x)
+    mask_y = (test_counts >= lower_y) & (test_counts <= upper_y)
+    mask = mask_x & mask_y
+
+    repo_stars_filtered = repo_stars[mask]
+    test_counts_filtered = test_counts[mask]
+    outliers_x = repo_stars[~mask]
+    outliers_y = test_counts[~mask]
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    # Scatter plot for non-outliers only
+    ax.scatter(repo_stars_filtered, test_counts_filtered, alpha=0.6, s=100, color="black", label="Data")
+    
+    # Print outliers if any (but don't plot them)
+    if len(outliers_x) > 0:
+        print(f"Excluded {len(outliers_x)} outlier(s) from correlation analysis:")
+        outlier_repos = repo_names[~mask]
+        for i, (repo, stars, tests) in enumerate(zip(outlier_repos, outliers_x, outliers_y)):
+            print(f"  {i+1}. {repo}: {int(stars)} stars, {int(tests)} tests")
+        print()
+
+    # Add linear regression line using filtered data
+    if len(repo_stars_filtered) > 1:
+        z = np.polyfit(repo_stars_filtered, test_counts_filtered, 1)
+        p = np.poly1d(z)
+        x_line = np.linspace(min(repo_stars_filtered), max(repo_stars_filtered), 100)
+        ax.plot(x_line, p(x_line), "r--", alpha=0.8, linewidth=2, label=f"y={z[0]:.4f}x+{z[1]:.2f}")
+
+        # Calculate correlation coefficient on filtered data
+        correlation = np.corrcoef(repo_stars_filtered, test_counts_filtered)[0, 1]
+        ax.text(
+            0.05, 0.95,
+            f"Correlation: {correlation:.3f}",
+            transform=ax.transAxes,
+            fontsize=16,
+            verticalalignment="top",
+            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+        )
+
+    # Customize plot
+    ax.set_xlabel("Repository Stars", fontsize=18, fontweight="bold")
+    ax.set_ylabel("Total Number of Unit Tests", fontsize=18, fontweight="bold")
+    ax.set_title(
+        "Correlation: Number of Tests vs Repository Stars",
+        fontsize=20,
+        fontweight="bold",
+        pad=20,
+    )
+    ax.tick_params(axis="both", labelsize=14)
+    ax.grid(alpha=0.3, linestyle="--")
+    ax.legend(fontsize=14, loc="upper right")
+
+    plt.tight_layout()
+
+    # Ensure output directory exists
+    output_dir = Path(output_path).parent
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save plot
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+    print(f"Number of tests vs repo stars correlation plot saved to: {output_path}")
+
+
 def discover_repos() -> list[str]:
     """Discover all repos under logs/run_validation.
 
@@ -925,6 +1424,18 @@ def main():
             plot_per_repo_distribution(
                 all_analyses, str(per_repo_output), args.show_repo_owner
             )
+
+            # Plot timeout vs tests correlation
+            correlation_output = Path("logs/analysis") / "num_tests_timeout_correlation.png"
+            plot_timeout_vs_tests_correlation(all_analyses, str(correlation_output))
+
+            # Plot num_tests vs repo_size correlation
+            repo_size_output = Path("logs/analysis") / "num_tests_repo_size_correlation.png"
+            plot_num_tests_repo_size_correlation(all_analyses, str(repo_size_output))
+
+            # Plot num_tests vs repo_stars correlation
+            repo_star_output = Path("logs/analysis") / "num_tests_repo_star_correlation.png"
+            plot_num_tests_repo_star_correlation(all_analyses, str(repo_star_output))
 
 
 if __name__ == "__main__":
