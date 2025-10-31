@@ -96,6 +96,10 @@ def analyze_bugs(repo_id: str) -> Dict[str, Any]:
                 with open(report_path, "r") as f:
                     report = json.load(f)
 
+                # Only count as validated if report contains FAIL_TO_PASS field (excludes timeouts)
+                if FAIL_TO_PASS not in report:
+                    continue
+
                 modifier_name = extract_modifier_name(instance_dir)
                 total_validated += 1
 
@@ -231,7 +235,7 @@ def save_report(analysis: Dict[str, Any], output_file: str) -> None:
     print(f"Detailed report saved to: {output_file}")
 
 
-def plot_bug_distribution(analysis: Dict[str, Any], output_path: str) -> None:
+def plot_bug_distribution(analysis: Dict[str, Any], output_path: str, show_generated_bugs: bool = False) -> None:
     """Plot bar chart of bug distribution by modifier type.
 
     Args:
@@ -302,33 +306,65 @@ def plot_bug_distribution(analysis: Dict[str, Any], output_path: str) -> None:
     )
 
     # Create figure and axis
-    fig, ax = plt.subplots(figsize=(14, 8))
+    fig, ax = plt.subplots(figsize=(14, 8.8))
 
     # Set positions for bars
     x = np.arange(len(modifiers_display))
     width = 0.6
 
     # Create overlaid bars (drawn from back to front)
-    # Back: Validated (light grey)
-    bars1 = ax.bar(
-        x,
-        validated_counts,
-        width,
-        label="Validated",
-        color="lightgrey",
-        edgecolor="none",
-        zorder=1,
-    )
-    # Front: Passed (black) - overlay on validated
-    bars2 = ax.bar(
-        x,
-        passed_counts,
-        width,
-        label="Passed",
-        color="black",
-        edgecolor="none",
-        zorder=2,
-    )
+    if show_generated_bugs:
+        # Back: Generated (lightgray - 10% darker than whitesmoke)
+        bars0 = ax.bar(
+            x,
+            generated_counts,
+            width,
+            label="Generated",
+            color="lightgray",
+            edgecolor="none",
+            zorder=1,
+        )
+        # Middle: Validated (gray - 10% darker than silver)
+        bars1 = ax.bar(
+            x,
+            validated_counts,
+            width,
+            label="Validated",
+            color="gray",
+            edgecolor="none",
+            zorder=2,
+        )
+        # Front: Passed (black) - overlay on validated
+        bars2 = ax.bar(
+            x,
+            passed_counts,
+            width,
+            label="Passed",
+            color="black",
+            edgecolor="none",
+            zorder=3,
+        )
+    else:
+        # Back: Validated (light grey)
+        bars1 = ax.bar(
+            x,
+            validated_counts,
+            width,
+            label="Validated",
+            color="lightgrey",
+            edgecolor="none",
+            zorder=1,
+        )
+        # Front: Passed (black) - overlay on validated
+        bars2 = ax.bar(
+            x,
+            passed_counts,
+            width,
+            label="Passed",
+            color="black",
+            edgecolor="none",
+            zorder=2,
+        )
 
     # Customize plot
     ax.set_xlabel("Modifier Type", fontsize=22, fontweight="bold")
@@ -343,29 +379,65 @@ def plot_bug_distribution(analysis: Dict[str, Any], output_path: str) -> None:
     ax.grid(axis="y", alpha=0.3, linestyle="--")
 
     # Add value labels on bars
-    for i, (val, pas) in enumerate(zip(validated_counts, passed_counts)):
-        # Label for validated (at the top of validated bar)
-        ax.text(
-            x[i],
-            val,
-            f"{int(val)}",
-            ha="center",
-            va="bottom",
-            fontsize=16,
-            fontweight="bold",
-            color="dimgrey",
-        )
-        # Label for passed (at the top of passed bar)
-        ax.text(
-            x[i],
-            pas,
-            f"{int(pas)}",
-            ha="center",
-            va="bottom",
-            fontsize=16,
-            fontweight="bold",
-            color="black",
-        )
+    if show_generated_bugs:
+        for i, (gen, val, pas) in enumerate(zip(generated_counts, validated_counts, passed_counts)):
+            # Label for generated (at the top of generated bar)
+            ax.text(
+                x[i],
+                gen,
+                f"{int(gen)}",
+                ha="center",
+                va="bottom",
+                fontsize=16,
+                fontweight="bold",
+                color="dimgrey",
+            )
+            # Label for validated (at the top of validated bar)
+            ax.text(
+                x[i],
+                val,
+                f"{int(val)}",
+                ha="center",
+                va="bottom",
+                fontsize=16,
+                fontweight="bold",
+                color="dimgrey",
+            )
+            # Label for passed (at the top of passed bar)
+            ax.text(
+                x[i],
+                pas,
+                f"{int(pas)}",
+                ha="center",
+                va="bottom",
+                fontsize=16,
+                fontweight="bold",
+                color="white",
+            )
+    else:
+        for i, (val, pas) in enumerate(zip(validated_counts, passed_counts)):
+            # Label for validated (at the top of validated bar)
+            ax.text(
+                x[i],
+                val,
+                f"{int(val)}",
+                ha="center",
+                va="bottom",
+                fontsize=16,
+                fontweight="bold",
+                color="dimgrey",
+            )
+            # Label for passed (at the top of passed bar)
+            ax.text(
+                x[i],
+                pas,
+                f"{int(pas)}",
+                ha="center",
+                va="bottom",
+                fontsize=16,
+                fontweight="bold",
+                color="black",
+            )
 
     # Tight layout to prevent label cutoff
     plt.tight_layout()
@@ -516,6 +588,12 @@ def main():
         default=None,
         help="Output file for detailed JSON report (default: logs/analysis/<repo_id>_analysis.json or logs/analysis/aggregate_analysis.json)",
     )
+    parser.add_argument(
+        "--show-generated-bugs",
+        action="store_true",
+        default=False,
+        help="Show generated bugs as another bar behind validated and passed. If enabled, validated bar shows in grey and generated in light grey.",
+    )
 
     args = parser.parse_args()
 
@@ -533,7 +611,7 @@ def main():
 
         # Plot bug distribution
         plot_output = Path("logs/analysis") / "bug_distribution.png"
-        plot_bug_distribution(analysis, str(plot_output))
+        plot_bug_distribution(analysis, str(plot_output), args.show_generated_bugs)
     else:
         # Analyze all repos
         repos = discover_repos()
@@ -634,7 +712,7 @@ def main():
 
             # Plot aggregate bug distribution
             plot_output = Path("logs/analysis") / "bug_distribution.png"
-            plot_bug_distribution(aggregate_data, str(plot_output))
+            plot_bug_distribution(aggregate_data, str(plot_output), args.show_generated_bugs)
 
 
 if __name__ == "__main__":
