@@ -279,6 +279,20 @@ def plot_bug_distribution(analysis: Dict[str, Any], output_path: str) -> None:
             validated_counts.append(0)
             passed_counts.append(0)
     
+    # Filter out modifiers with zero passed bugs
+    filtered_data = [
+        (mod, gen, val, pas) 
+        for mod, gen, val, pas in zip(modifiers_display, generated_counts, validated_counts, passed_counts)
+        if pas > 0
+    ]
+    
+    if not filtered_data:
+        print("No modifiers with passed bugs to plot")
+        return
+    
+    # Unpack filtered data
+    modifiers_display, generated_counts, validated_counts, passed_counts = zip(*filtered_data)
+    
     # Create figure and axis
     fig, ax = plt.subplots(figsize=(14, 8))
     
@@ -304,16 +318,14 @@ def plot_bug_distribution(analysis: Dict[str, Any], output_path: str) -> None:
     ax.legend(fontsize=20, loc='upper right')
     ax.grid(axis='y', alpha=0.3, linestyle='--')
     
-    # Add value labels on bars (only if count >= 10)
+    # Add value labels on bars
     for i, (val, pas) in enumerate(zip(validated_counts, passed_counts)):
         # Label for validated (at the top of validated bar)
-        if val >= 10:
-            ax.text(x[i], val, f'{int(val)}',
-                   ha='center', va='bottom', fontsize=16, fontweight='bold', color='dimgrey')
+        ax.text(x[i], val, f'{int(val)}',
+               ha='center', va='bottom', fontsize=16, fontweight='bold', color='dimgrey')
         # Label for passed (at the top of passed bar)
-        if pas >= 10:
-            ax.text(x[i], pas, f'{int(pas)}',
-                   ha='center', va='bottom', fontsize=16, fontweight='bold', color='black')
+        ax.text(x[i], pas, f'{int(pas)}',
+               ha='center', va='bottom', fontsize=16, fontweight='bold', color='black')
     
     # Tight layout to prevent label cutoff
     plt.tight_layout()
