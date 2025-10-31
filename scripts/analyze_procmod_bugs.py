@@ -233,7 +233,7 @@ def save_report(analysis: Dict[str, Any], output_file: str) -> None:
 
 def plot_bug_distribution(analysis: Dict[str, Any], output_path: str) -> None:
     """Plot bar chart of bug distribution by modifier type.
-    
+
     Args:
         analysis: Analysis results dictionary
         output_path: Path to save the plot
@@ -241,103 +241,143 @@ def plot_bug_distribution(analysis: Dict[str, Any], output_path: str) -> None:
     # Extract data
     generated_by_modifier = analysis.get("generated_by_modifier", {})
     validated_by_modifier = analysis.get("validated_by_modifier", {})
-    
+
     # If it's aggregate data, handle differently
     if "aggregate_statistics" in analysis:
         modifier_data = analysis["aggregate_statistics"]["by_modifier"]
         generated_by_modifier = {k: v["generated"] for k, v in modifier_data.items()}
         validated_by_modifier = {
-            k: {"total": v["validated"], "passed": v["passed"]} 
+            k: {"total": v["validated"], "passed": v["passed"]}
             for k, v in modifier_data.items()
         }
-    
+
     if not generated_by_modifier:
         print("No data to plot")
         return
-    
+
     # Sort modifiers by generated count (descending)
     sorted_modifiers = sorted(
         generated_by_modifier.items(), key=lambda x: x[1], reverse=True
     )
-    
+
     modifier_keys = [m[0] for m in sorted_modifiers]
-    modifiers_display = [m[0].replace('func_pm_', '') for m in sorted_modifiers]
+    modifiers_display = [m[0].replace("func_pm_", "") for m in sorted_modifiers]
     generated_counts = [m[1] for m in sorted_modifiers]
-    
+
     # Get validated and passed counts for each modifier
     validated_counts = []
     passed_counts = []
     for modifier_key in modifier_keys:
         if modifier_key in validated_by_modifier:
             if isinstance(validated_by_modifier[modifier_key], dict):
-                validated_counts.append(validated_by_modifier[modifier_key].get("total", 0))
-                passed_counts.append(validated_by_modifier[modifier_key].get("passed", 0))
+                validated_counts.append(
+                    validated_by_modifier[modifier_key].get("total", 0)
+                )
+                passed_counts.append(
+                    validated_by_modifier[modifier_key].get("passed", 0)
+                )
             else:
                 validated_counts.append(validated_by_modifier[modifier_key])
                 passed_counts.append(0)
         else:
             validated_counts.append(0)
             passed_counts.append(0)
-    
+
     # Filter out modifiers with zero passed bugs
     filtered_data = [
-        (mod, gen, val, pas) 
-        for mod, gen, val, pas in zip(modifiers_display, generated_counts, validated_counts, passed_counts)
+        (mod, gen, val, pas)
+        for mod, gen, val, pas in zip(
+            modifiers_display, generated_counts, validated_counts, passed_counts
+        )
         if pas > 0
     ]
-    
+
     if not filtered_data:
         print("No modifiers with passed bugs to plot")
         return
-    
+
     # Unpack filtered data
-    modifiers_display, generated_counts, validated_counts, passed_counts = zip(*filtered_data)
-    
+    modifiers_display, generated_counts, validated_counts, passed_counts = zip(
+        *filtered_data
+    )
+
     # Create figure and axis
     fig, ax = plt.subplots(figsize=(14, 8))
-    
+
     # Set positions for bars
     x = np.arange(len(modifiers_display))
     width = 0.6
-    
+
     # Create overlaid bars (drawn from back to front)
     # Back: Validated (light grey)
-    bars1 = ax.bar(x, validated_counts, width,
-                   label='Validated', color='lightgrey', edgecolor='none', zorder=1)
+    bars1 = ax.bar(
+        x,
+        validated_counts,
+        width,
+        label="Validated",
+        color="lightgrey",
+        edgecolor="none",
+        zorder=1,
+    )
     # Front: Passed (black) - overlay on validated
-    bars2 = ax.bar(x, passed_counts, width,
-                   label='Passed', color='black', edgecolor='none', zorder=2)
-    
+    bars2 = ax.bar(
+        x,
+        passed_counts,
+        width,
+        label="Passed",
+        color="black",
+        edgecolor="none",
+        zorder=2,
+    )
+
     # Customize plot
-    ax.set_xlabel('Modifier Type', fontsize=22, fontweight='bold')
-    ax.set_ylabel('Number of Bugs', fontsize=22, fontweight='bold')
-    ax.set_title('Bug Distribution by Modifier Type', fontsize=24, fontweight='bold', pad=20)
+    ax.set_xlabel("Modifier Type", fontsize=22, fontweight="bold")
+    ax.set_ylabel("Number of Bugs", fontsize=22, fontweight="bold")
+    ax.set_title(
+        "Bug Distribution by Modifier Type", fontsize=24, fontweight="bold", pad=20
+    )
     ax.set_xticks(x)
-    ax.set_xticklabels(modifiers_display, rotation=45, ha='right', fontsize=20)
-    ax.tick_params(axis='y', labelsize=20)
-    ax.legend(fontsize=20, loc='upper right')
-    ax.grid(axis='y', alpha=0.3, linestyle='--')
-    
+    ax.set_xticklabels(modifiers_display, rotation=45, ha="right", fontsize=20)
+    ax.tick_params(axis="y", labelsize=20)
+    ax.legend(fontsize=20, loc="upper right")
+    ax.grid(axis="y", alpha=0.3, linestyle="--")
+
     # Add value labels on bars
     for i, (val, pas) in enumerate(zip(validated_counts, passed_counts)):
         # Label for validated (at the top of validated bar)
-        ax.text(x[i], val, f'{int(val)}',
-               ha='center', va='bottom', fontsize=16, fontweight='bold', color='dimgrey')
+        ax.text(
+            x[i],
+            val,
+            f"{int(val)}",
+            ha="center",
+            va="bottom",
+            fontsize=16,
+            fontweight="bold",
+            color="dimgrey",
+        )
         # Label for passed (at the top of passed bar)
-        ax.text(x[i], pas, f'{int(pas)}',
-               ha='center', va='bottom', fontsize=16, fontweight='bold', color='black')
-    
+        ax.text(
+            x[i],
+            pas,
+            f"{int(pas)}",
+            ha="center",
+            va="bottom",
+            fontsize=16,
+            fontweight="bold",
+            color="black",
+        )
+
     # Tight layout to prevent label cutoff
     plt.tight_layout()
-    
+
     # Ensure output directory exists
     output_dir = Path(output_path).parent
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Save plot
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close()
-    
+
     print(f"Bug distribution plot saved to: {output_path}")
 
 
@@ -490,7 +530,7 @@ def main():
             args.output = str(output_dir / f"{args.repo}_analysis.json")
 
         save_report(analysis, args.output)
-        
+
         # Plot bug distribution
         plot_output = Path("logs/analysis") / "bug_distribution.png"
         plot_bug_distribution(analysis, str(plot_output))
@@ -591,7 +631,7 @@ def main():
                 "individual_analyses": all_analyses,
             }
             save_report(aggregate_data, args.output)
-            
+
             # Plot aggregate bug distribution
             plot_output = Path("logs/analysis") / "bug_distribution.png"
             plot_bug_distribution(aggregate_data, str(plot_output))

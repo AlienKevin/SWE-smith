@@ -101,7 +101,9 @@ def main(
 
         # Shuffle all pairs to interleave modifiers
         random.shuffle(pairs)
-        print(f"[{repo}] Processing {len(pairs)} (candidate, modifier) pairs in randomized order.")
+        print(
+            f"[{repo}] Processing {len(pairs)} (candidate, modifier) pairs in randomized order."
+        )
 
         # Process in randomized order
         for candidate, pm in tqdm(pairs):

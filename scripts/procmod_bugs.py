@@ -94,7 +94,7 @@ def generate_bugs(repo_id, max_bugs, interleave=False):
     ]
     if interleave:
         cmd_parts.append("--interleave")
-    
+
     print(f"Running: {' '.join(cmd_parts)}")
 
     try:
