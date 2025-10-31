@@ -96,9 +96,9 @@ def analyze_bugs(repo_id: str) -> Dict[str, Any]:
         for instance_dir in os.listdir(validation_dir):
             # Skip reference tests
             if instance_dir.endswith(".ref"):
-                print(f'Skipping {instance_dir} because it is a reference test')
+                print(f"Skipping {instance_dir} because it is a reference test")
                 continue
-            
+
             instance_path = validation_dir / instance_dir
             report_path = instance_path / LOG_REPORT
 
@@ -263,7 +263,12 @@ def save_report(analysis: Dict[str, Any], output_file: str) -> None:
     print(f"Detailed report saved to: {output_file}")
 
 
-def plot_bug_distribution(analysis: Dict[str, Any], output_path: str, show_generated_bugs: bool = False, show_timeout_bugs: bool = False) -> None:
+def plot_bug_distribution(
+    analysis: Dict[str, Any],
+    output_path: str,
+    show_generated_bugs: bool = False,
+    show_timeout_bugs: bool = False,
+) -> None:
     """Plot bar chart of bug distribution by modifier type.
 
     Args:
@@ -319,7 +324,7 @@ def plot_bug_distribution(analysis: Dict[str, Any], output_path: str, show_gener
         else:
             validated_counts.append(0)
             passed_counts.append(0)
-        
+
         # Get timeout count for this modifier
         timeout_counts.append(timeout_by_modifier.get(modifier_key, 0))
 
@@ -327,7 +332,11 @@ def plot_bug_distribution(analysis: Dict[str, Any], output_path: str, show_gener
     filtered_data = [
         (mod, gen, val, pas, tim)
         for mod, gen, val, pas, tim in zip(
-            modifiers_display, generated_counts, validated_counts, passed_counts, timeout_counts
+            modifiers_display,
+            generated_counts,
+            validated_counts,
+            passed_counts,
+            timeout_counts,
         )
         if pas > 0
     ]
@@ -337,9 +346,13 @@ def plot_bug_distribution(analysis: Dict[str, Any], output_path: str, show_gener
         return
 
     # Unpack filtered data
-    modifiers_display, generated_counts, validated_counts, passed_counts, timeout_counts = zip(
-        *filtered_data
-    )
+    (
+        modifiers_display,
+        generated_counts,
+        validated_counts,
+        passed_counts,
+        timeout_counts,
+    ) = zip(*filtered_data)
 
     # Create figure and axis
     fig, ax = plt.subplots(figsize=(14, 8.8))
@@ -444,7 +457,9 @@ def plot_bug_distribution(analysis: Dict[str, Any], output_path: str, show_gener
 
     # Add value labels on bars
     if show_generated_bugs:
-        for i, (gen, val, pas, tim) in enumerate(zip(generated_counts, validated_counts, passed_counts, timeout_counts)):
+        for i, (gen, val, pas, tim) in enumerate(
+            zip(generated_counts, validated_counts, passed_counts, timeout_counts)
+        ):
             # Label for generated (at the top of generated bar)
             ax.text(
                 x[i],
@@ -492,7 +507,9 @@ def plot_bug_distribution(analysis: Dict[str, Any], output_path: str, show_gener
                     color="dimgrey",
                 )
     else:
-        for i, (gen, val, pas, tim) in enumerate(zip(generated_counts, validated_counts, passed_counts, timeout_counts)):
+        for i, (gen, val, pas, tim) in enumerate(
+            zip(generated_counts, validated_counts, passed_counts, timeout_counts)
+        ):
             # Label for validated (at the top of validated bar)
             if not show_timeout_bugs:
                 ax.text(
@@ -543,9 +560,11 @@ def plot_bug_distribution(analysis: Dict[str, Any], output_path: str, show_gener
     print(f"Bug distribution plot saved to: {output_path}")
 
 
-def plot_per_repo_distribution(all_analyses: list[Dict[str, Any]], output_path: str, show_repo_owner: bool = False) -> None:
+def plot_per_repo_distribution(
+    all_analyses: list[Dict[str, Any]], output_path: str, show_repo_owner: bool = False
+) -> None:
     """Plot per-repo breakdown of validated, passed, and timeout bugs.
-    
+
     Args:
         all_analyses: List of analysis results for each repo
         output_path: Path to save the plot
@@ -554,54 +573,58 @@ def plot_per_repo_distribution(all_analyses: list[Dict[str, Any]], output_path: 
     if not all_analyses:
         print("No data to plot")
         return
-    
+
     # Extract data per repo
     repos = [a["repo_id"] for a in all_analyses]
     validated = [a["total_validated"] for a in all_analyses]
     passed = [a["total_passed"] for a in all_analyses]
     timeout = [a.get("total_timeouts", 0) for a in all_analyses]
-    
+
     # Truncate commit_id from repo names (remove part after last dot)
     repos_display = [r.rsplit(".", 1)[0] for r in repos]
-    
+
     # Replace __ with / and optionally hide owner
     if show_repo_owner:
         repos_display = [r.replace("__", "/") for r in repos_display]
     else:
         # Hide owner (everything before and including __)
-        repos_display = [r.split("__", 1)[-1] if "__" in r else r for r in repos_display]
-    
+        repos_display = [
+            r.split("__", 1)[-1] if "__" in r else r for r in repos_display
+        ]
+
     # Create figure
     fig, ax = plt.subplots(figsize=(16, 10))
-    
+
     x = np.arange(len(repos))
     width = 0.25
-    
+
     # Create grouped bars
     ax.bar(x - width, validated, width, label="Validated", color="lightgrey")
     ax.bar(x, passed, width, label="Passed", color="black")
     ax.bar(x + width, timeout, width, label="Timeout", color="gray", hatch="...")
-    
+
     # Customize plot
     ax.set_xlabel("Repository", fontsize=22, fontweight="bold")
     ax.set_ylabel("Number of Bugs", fontsize=22, fontweight="bold")
-    ax.set_title("Per-Repository Bug Distribution", fontsize=24, fontweight="bold", pad=20)
+    ax.set_title(
+        "Per-Repository Bug Distribution", fontsize=24, fontweight="bold", pad=20
+    )
     ax.set_xticks(x)
     ax.set_xticklabels(repos_display, rotation=45, ha="right", fontsize=14)
     ax.tick_params(axis="y", labelsize=20)
     ax.legend(fontsize=20, loc="upper right")
     ax.grid(axis="y", alpha=0.3, linestyle="--")
-    
+
     plt.tight_layout()
-    
+
     # Ensure output directory exists
     output_dir = Path(output_path).parent
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Save plot
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close()
-    
+
     print(f"Per-repo distribution plot saved to: {output_path}")
 
 
@@ -656,7 +679,7 @@ def print_aggregate_statistics(all_analyses: list[Dict[str, Any]]) -> None:
             modifier_stats[modifier]["failed"] += data["failed"]
             modifier_stats[modifier]["f2p_counts"].extend(data["f2p_counts"])
             modifier_stats[modifier]["p2p_counts"].extend(data["p2p_counts"])
-        
+
         for modifier, count in analysis.get("timeout_by_modifier", {}).items():
             modifier_stats[modifier]["timeout"] += count
 
@@ -780,7 +803,9 @@ def main():
 
         # Plot bug distribution
         plot_output = Path("logs/analysis") / "bug_distribution.png"
-        plot_bug_distribution(analysis, str(plot_output), args.show_generated_bugs, args.show_timeout_bugs)
+        plot_bug_distribution(
+            analysis, str(plot_output), args.show_generated_bugs, args.show_timeout_bugs
+        )
     else:
         # Analyze all repos
         repos = discover_repos()
@@ -842,7 +867,7 @@ def main():
                     modifier_stats[modifier]["failed"] += data["failed"]
                     modifier_stats[modifier]["f2p_counts"].extend(data["f2p_counts"])
                     modifier_stats[modifier]["p2p_counts"].extend(data["p2p_counts"])
-                
+
                 for modifier, count in analysis.get("timeout_by_modifier", {}).items():
                     modifier_stats[modifier]["timeout"] += count
 
@@ -888,11 +913,18 @@ def main():
 
             # Plot aggregate bug distribution
             plot_output = Path("logs/analysis") / "bug_distribution.png"
-            plot_bug_distribution(aggregate_data, str(plot_output), args.show_generated_bugs, args.show_timeout_bugs)
-            
+            plot_bug_distribution(
+                aggregate_data,
+                str(plot_output),
+                args.show_generated_bugs,
+                args.show_timeout_bugs,
+            )
+
             # Plot per-repo distribution
             per_repo_output = Path("logs/analysis") / "per_repo_bug_distribution.png"
-            plot_per_repo_distribution(all_analyses, str(per_repo_output), args.show_repo_owner)
+            plot_per_repo_distribution(
+                all_analyses, str(per_repo_output), args.show_repo_owner
+            )
 
 
 if __name__ == "__main__":
