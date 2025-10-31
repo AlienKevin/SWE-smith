@@ -70,7 +70,11 @@ def analyze_bugs(repo_id: str) -> Dict[str, Any]:
                 total_generated += 1
                 modifier_name = file.split("bug__")[1].split("__")[0]
                 instance_id = f"{repo_id}.{file.split('bug__')[1].replace('.diff', '')}"
+                # print(f'Generated bug: {instance_id}')
                 generated_bugs[modifier_name].append(instance_id)
+
+    generated_bugs_len = sum(len(v) for v in generated_bugs.values())
+    assert generated_bugs_len == total_generated
 
     validated_bugs = defaultdict(
         lambda: {
@@ -89,8 +93,16 @@ def analyze_bugs(repo_id: str) -> Dict[str, Any]:
     total_passed = 0
     total_failed = 0
 
+    print(f"{len(os.listdir(validation_dir))=}")
+    print(f"{total_generated=}")
+
     if validation_dir.exists():
         for instance_dir in os.listdir(validation_dir):
+            # Skip reference tests
+            if instance_dir.endswith(".ref"):
+                print(f'Skipping {instance_dir} because it is a reference test')
+                continue
+            
             instance_path = validation_dir / instance_dir
             report_path = instance_path / LOG_REPORT
 
@@ -100,11 +112,10 @@ def analyze_bugs(repo_id: str) -> Dict[str, Any]:
 
                 modifier_name = extract_modifier_name(instance_dir)
 
-                # Only count as validated if report contains FAIL_TO_PASS field (excludes timeouts)
-                if FAIL_TO_PASS not in report:
-                    # This is a timeout case
+                # Exclude if report timed_out is true
+                if report.get("timed_out", False):
+                    print(f"Timeout bug from timed_out == True: {instance_dir}")
                     timeout_bugs[modifier_name].append(instance_dir)
-                    total_timeouts += 1
                     continue
 
                 total_validated += 1
@@ -125,6 +136,42 @@ def analyze_bugs(repo_id: str) -> Dict[str, Any]:
                 else:
                     validated_bugs[modifier_name]["failed"] += 1
                     total_failed += 1
+            else:
+                print(f"Timeout bug from missing report: {instance_dir}")
+                timeout_bugs[modifier_name].append(instance_dir)
+
+    total_timeouts = total_generated - total_validated
+    # Add generated bugs that are missing from the validated folder to timeout_bugs
+    for modifier_name, bug_list in generated_bugs.items():
+        for bug_id in bug_list:
+            instance_path = validation_dir / bug_id
+            # If the bug was generated but not validated (not in validation folder)
+            if not instance_path.exists():
+                print(f"Timeout bug from missing validation folder: {bug_id}")
+                timeout_bugs[modifier_name].append(bug_id)
+    timeout_bugs_len = sum(len(v) for v in timeout_bugs.values())
+
+    gen_bugs = [bug for bugs in generated_bugs.values() for bug in bugs]
+    val_bugs = os.listdir(validation_dir)
+    print(f'{gen_bugs=}')
+    print(f'{val_bugs=}')
+    duplicated_gen_bugs = [bug for bug in gen_bugs if gen_bugs.count(bug) > 1]
+    if duplicated_gen_bugs:
+        print(f"Duplicated generated bugs: {set(duplicated_gen_bugs)}")
+    # assert len(gen_bugs) == len(set(gen_bugs))
+    
+    assert len(val_bugs) == len(set(val_bugs))
+    missing_bugs1 = list(set(gen_bugs) - set(val_bugs))
+    missing_bugs2 = list(set(val_bugs) - set(gen_bugs))
+    print(len(missing_bugs1))
+    print(len(missing_bugs2))
+    for bug2 in missing_bugs2:
+        print(bug2)
+
+    print(f'{total_validated=}')
+    print(f"Total timeouts: {total_timeouts}")
+    print(f"Timeout bugs: {timeout_bugs_len}")
+    assert total_timeouts == timeout_bugs_len
 
     return {
         "repo_id": repo_id,
