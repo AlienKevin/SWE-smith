@@ -391,8 +391,8 @@ def main():
         "--validation-timeout",
         "-t",
         type=int,
-        default=300,
-        help="Timeout in seconds for validation step (default: 300)",
+        default=600,
+        help="Timeout in seconds for validation step (default: 600)",
     )
     parser.add_argument(
         "--use-modal",

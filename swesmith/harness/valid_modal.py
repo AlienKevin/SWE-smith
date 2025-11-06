@@ -87,7 +87,7 @@ def get_modal_image(docker_image_name: str) -> modal.Image:
 
 @app.function(
     image=coordinator_image,
-    timeout=1 * 60,  # 1 minute per instance
+    timeout=5 * 60,  # 5 minute per instance
     cpu=1,
 )
 def run_validation_single(
