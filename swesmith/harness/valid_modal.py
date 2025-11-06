@@ -33,8 +33,9 @@ from swesmith.constants import (
     TEST_OUTPUT_START,
     TEST_OUTPUT_END,
 )
-# from swesmith.harness.grading import get_valid_report  # Not needed for now
-# from swesmith.profiles import registry  # Removed - test_cmd now in instance data
+# Re-enabled for proper grading implementation
+from swesmith.harness.grading import get_valid_report as local_get_valid_report
+from swesmith.profiles import registry as local_registry
 
 # Modal app setup
 app = modal.App("swesmith-validation-v2")
@@ -52,10 +53,23 @@ class ValidationOutput:
     errored: bool
 
 
-# Minimal coordinator image - only needs swebench for constants
-# Test commands are now included in instance data (SWE-bench style)
-# No swesmith install needed!
-coordinator_image = modal.Image.debian_slim(python_version="3.11").pip_install("swebench")
+# Coordinator image needs swesmith for proper grading (registry + log parsers)
+# Test commands are in instance data (SWE-bench style) but we still need
+# the registry for log parsing in get_valid_report
+coordinator_image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .apt_install("git")
+    .pip_install(
+        "swebench",
+        "unidiff",
+        "tree-sitter",
+        "tree-sitter-languages",
+    )
+    .run_commands(
+        "git clone https://github.com/AlienKevin/SWE-smith.git /swesmith",
+        "cd /swesmith && pip install -e .",
+    )
+)
 
 
 # Cache for Modal images by Docker image name
@@ -73,8 +87,8 @@ def get_modal_image(docker_image_name: str) -> modal.Image:
 
 @app.function(
     image=coordinator_image,
-    timeout=15 * 60,  # 15 minutes per instance
-    cpu=2,
+    timeout=1 * 60,  # 1 minute per instance
+    cpu=1,
 )
 def run_validation_single(
     instance_json: str,
@@ -129,7 +143,41 @@ def run_validation_single(
         # Note: The Docker image already has the repo at the correct commit,
         # so we don't need to checkout anything. Just apply patch and test.
         
-        # 1. Apply patch if provided (mirroring run_patch_in_container logic)
+        # Get test command from instance data (SWE-bench style - no registry needed!)
+        test_command = instance.get("test_cmd", "echo 'No test_cmd found'")
+        
+        # Create eval script (mirrors utils.py lines 211-223)
+        eval_script = "\n".join([
+            "#!/bin/bash",
+            "set -uxo pipefail",
+            f"cd {DOCKER_WORKDIR}",
+            f": '{TEST_OUTPUT_START}'",
+            test_command,
+            f": '{TEST_OUTPUT_END}'",
+        ]) + "\n"
+        
+        # Write eval script to container
+        write_eval_result = sandbox.exec(
+            "sh", "-c", f"cat > /eval.sh << 'EOF'\n{eval_script}\nEOF",
+        )
+        write_eval_result.wait()
+        
+        # Make it executable
+        chmod_result = sandbox.exec("chmod", "+x", "/eval.sh")
+        chmod_result.wait()
+        
+        # 1. Run tests WITHOUT patch (pre-gold/reference) to get baseline
+        # Redirect stderr to stdout (2>&1) to preserve output order for marker parsing
+        test_result_pregold = sandbox.exec(
+            "sh", "-c", "/bin/bash /eval.sh 2>&1",
+            workdir=DOCKER_WORKDIR,
+        )
+        test_result_pregold.wait()
+        
+        # Extract pre-gold test output (stdout now contains both streams in order)
+        test_output_pregold = test_result_pregold.stdout.read() if test_result_pregold.stdout else ""
+        
+        # 2. Apply patch if provided (mirroring run_patch_in_container logic)
         if KEY_PATCH in instance and instance[KEY_PATCH]:
             patch_content = instance[KEY_PATCH]
             
@@ -158,59 +206,60 @@ def run_validation_single(
                     errored=True,
                 )
         
-        # 2. Run tests using repo-specific test command
-        # Get test command from instance data (SWE-bench style - no registry needed!)
-        test_command = instance.get("test_cmd", "echo 'No test_cmd found'")
-        
-        # Create eval script (mirrors utils.py lines 211-223)
-        eval_script = "\n".join([
-            "#!/bin/bash",
-            "set -uxo pipefail",
-            f"cd {DOCKER_WORKDIR}",
-            f": '{TEST_OUTPUT_START}'",
-            test_command,
-            f": '{TEST_OUTPUT_END}'",
-        ]) + "\n"
-        
-        # Write eval script to container
-        write_eval_result = sandbox.exec(
-            "sh", "-c", f"cat > /eval.sh << 'EOF'\n{eval_script}\nEOF",
-        )
-        write_eval_result.wait()
-        
-        # Make it executable
-        chmod_result = sandbox.exec("chmod", "+x", "/eval.sh")
-        chmod_result.wait()
-        
-        # Run eval script with bash
-        test_result = sandbox.exec(
-            "/bin/bash", "/eval.sh",
+        # 3. Run tests WITH patch (post-gold) to see what the bug breaks
+        # Redirect stderr to stdout (2>&1) to preserve output order for marker parsing
+        test_result_postgold = sandbox.exec(
+            "sh", "-c", "/bin/bash /eval.sh 2>&1",
             workdir=DOCKER_WORKDIR,
         )
-        test_result.wait()
+        test_result_postgold.wait()
         
-        # Extract test output
-        stdout_str = test_result.stdout.read() if test_result.stdout else ""
-        stderr_str = test_result.stderr.read() if test_result.stderr else ""
-        test_output = stdout_str + "\n" + stderr_str
+        # Extract post-gold test output (stdout now contains both streams in order)
+        test_output_postgold = test_result_postgold.stdout.read() if test_result_postgold.stdout else ""
         
-        # 3. Grade using get_valid_report (mirrors valid.py lines 115-118)
-        # For validation, we compare against reference (no patch) output
-        # Since we don't have pre-gold in Modal yet, use simplified grading
-        # TODO: Implement pre-gold reference runs
+        # 4. Grade using get_valid_report (mirrors valid.py lines 130-136)
+        # Compare pre-gold (without patch) vs post-gold (with patch) outputs
         try:
-            # Try to use get_valid_report if we have reference data
-            # For now, do simplified parsing
-            report = {
-                FAIL_TO_PASS: [],
-                "test_output_available": True,
-            }
+            from swesmith.harness.grading import get_valid_report as grading_get_valid_report
+            from swesmith.profiles import registry as grading_registry
             
-            # Determine status based on test results
-            # If tests ran, consider it 0_f2p (no failures converted to passes without reference)
-            status = "0_f2p"
+            # Write outputs to temp files for grading
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', suffix='_pregold.txt', delete=False) as f:
+                f.write(test_output_pregold)
+                pregold_path = f.name
+            
+            with tempfile.NamedTemporaryFile(mode='w', suffix='_postgold.txt', delete=False) as f:
+                f.write(test_output_postgold)
+                postgold_path = f.name
+            
+            try:
+                # Get repo profile for log parsing
+                rp = grading_registry.get_from_inst(instance)
+                
+                # Use get_valid_report to compare pre vs post
+                report = grading_get_valid_report(
+                    val_pregold_path=postgold_path,  # WITH patch (should show failures)
+                    val_postgold_path=pregold_path,   # WITHOUT patch (should show passes)
+                    instance=instance,
+                )
+                
+                # Determine status based on FAIL_TO_PASS count
+                if len(report.get(FAIL_TO_PASS, [])) == 0:
+                    status = "0_f2p"
+                else:
+                    status = "1+_f2p"
+            finally:
+                # Clean up temp files
+                import os
+                try:
+                    os.unlink(pregold_path)
+                    os.unlink(postgold_path)
+                except:
+                    pass
             
         except Exception as e:
+            print(f"Error during grading for {instance_id}: {e}")
             report = {"error": str(e)}
             status = "fail"
         
@@ -219,8 +268,8 @@ def run_validation_single(
             docker_image=docker_image_name,
             status=status,
             report=report,
-            test_output=test_output,
-            run_log=stdout_str,
+            test_output=test_output_postgold,  # Post-gold output (with patch)
+            run_log=test_output_pregold,  # Pre-gold output with bash markers (stdout+stderr merged)
             errored=False,
         )
             
