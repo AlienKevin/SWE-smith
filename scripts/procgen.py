@@ -358,7 +358,8 @@ def process_repo(
     print()
 
     # Execute pipeline
-    check_docker_image(docker_image)
+    if not use_modal:
+        check_docker_image(docker_image)
     generate_bugs(repo_id, max_bugs)
     patches_file = collect_patches(repo_id)
     num_cores = get_num_cores()
