@@ -13,6 +13,7 @@ from pathlib import Path
 
 from swebench.harness.constants import KEY_INSTANCE_ID
 from swesmith.constants import LOG_DIR_BUG_GEN, KEY_PATCH, PREFIX_BUG
+from swesmith.profiles import registry
 
 
 def main(bug_gen_path: str | Path, bug_type: str = "all", num_bugs: int = -1):
@@ -55,6 +56,15 @@ def main(bug_gen_path: str | Path, bug_type: str = "all", num_bugs: int = -1):
                         "repo": repo,
                     }
                 )
+                
+                # Add test command from repo profile (for standalone Modal validation)
+                try:
+                    rp = registry.get_from_inst(patch)
+                    test_cmd, _ = rp.get_test_cmd(patch, f2p_only=False)
+                    patch["test_cmd"] = test_cmd
+                except Exception as e:
+                    print(f"Warning: Could not get test_cmd for {instance_id}: {e}")
+                
                 patches.append(patch)
                 if num_bugs != -1 and len(patches) >= num_bugs:
                     exit_loop = True

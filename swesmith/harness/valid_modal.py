@@ -10,6 +10,7 @@ Usage: modal run -m swesmith.harness.valid_modal_v2 --bug-patches logs/bug_gen/*
 import argparse
 import json
 import modal
+import random
 import time
 from collections import defaultdict
 from dataclasses import dataclass
@@ -26,10 +27,14 @@ from swebench.harness.constants import (
 from swesmith.constants import (
     KEY_PATCH,
     KEY_TIMED_OUT,
+    LOG_DIR_RUN_VALIDATION,
     LOG_TEST_OUTPUT_PRE_GOLD,
     REF_SUFFIX,
-    LOG_DIR_RUN_VALIDATION,
+    TEST_OUTPUT_START,
+    TEST_OUTPUT_END,
 )
+# from swesmith.harness.grading import get_valid_report  # Not needed for now
+# from swesmith.profiles import registry  # Removed - test_cmd now in instance data
 
 # Modal app setup
 app = modal.App("swesmith-validation-v2")
@@ -47,159 +52,196 @@ class ValidationOutput:
     errored: bool
 
 
-# Create a simple coordinator image for orchestration
+# Minimal coordinator image - only needs swebench for constants
+# Test commands are now included in instance data (SWE-bench style)
+# No swesmith install needed!
 coordinator_image = modal.Image.debian_slim(python_version="3.11").pip_install("swebench")
+
+
+# Cache for Modal images by Docker image name
+_image_cache = {}
+
+def get_modal_image(docker_image_name: str) -> modal.Image:
+    """Get or create Modal image from Docker registry (cached)."""
+    if docker_image_name not in _image_cache:
+        _image_cache[docker_image_name] = modal.Image.from_registry(
+            docker_image_name,
+            add_python="3.11"
+        )
+    return _image_cache[docker_image_name]
 
 
 @app.function(
     image=coordinator_image,
-    timeout=2 * 60 * 60,  # 2 hours for entire batch
+    timeout=15 * 60,  # 15 minutes per instance
+    cpu=2,
 )
-def run_validation_batch_modal(
-    instances_json: str,
+def run_validation_single(
+    instance_json: str,
     docker_image_name: str,
-) -> list[ValidationOutput]:
+) -> ValidationOutput:
     """
-    Run validation for a batch of instances using the same Docker image.
+    Run validation for a single instance using Modal Sandbox.
     
-    Uses Modal Sandboxes with Image.from_registry() to run each validation
-    in the repo-specific Docker environment.
+    This function runs in parallel via Modal's .map() - one invocation per instance.
     
     Args:
-        instances_json: JSON string of list of instances
+        instance_json: JSON string of a single instance
         docker_image_name: Docker image name (e.g., jyangballin/swesmith.x86_64.repo.commit)
         
     Returns:
-        List of ValidationOutput objects
+        ValidationOutput object
     """
-    instances = json.loads(instances_json)
+    instance = json.loads(instance_json)
+    instance_id = instance[KEY_INSTANCE_ID]
+    print(f"Running validation for {instance_id}...")
     
-    print(f"Processing {len(instances)} instances with image: {docker_image_name}")
+    # Get Modal image for this Docker image
+    repo_image = get_modal_image(docker_image_name)
     
-    # Create Modal image from Docker registry
-    repo_image = modal.Image.from_registry(docker_image_name, add_python="3.11")
-    
-    results = []
-    
-    for instance in instances:
-        instance_id = instance[KEY_INSTANCE_ID]
-        print(f"Running validation for {instance_id}...")
+    sandbox = None
+    try:
+        # Add random jitter to respect 5/s rate limit
+        # With 264 tasks, this spreads them over ~53 seconds minimum
+        jitter = random.uniform(0.2, 1.0)  # Random delay 200-1000ms
+        time.sleep(jitter)
         
-        sandbox = None
-        try:
-            # Add small delay to avoid rate limiting (5/s limit)
-            time.sleep(0.1)
+        # Create a sandbox with retry logic for rate limiting
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                sandbox = modal.Sandbox.create(
+                    image=repo_image,
+                    timeout=60 * 10,  # 10 minutes per instance
+                    cpu=2,
+                )
+                break  # Success!
+            except Exception as e:
+                if "rate limit" in str(e).lower() and attempt < max_retries - 1:
+                    # Exponential backoff: 1s, 2s, 4s, 8s
+                    backoff = 2 ** attempt
+                    print(f"Rate limited for {instance_id}, retrying in {backoff}s...")
+                    time.sleep(backoff)
+                else:
+                    raise  # Re-raise if not rate limit or final attempt
+        
+        # Run validation commands in the sandbox
+        # Note: The Docker image already has the repo at the correct commit,
+        # so we don't need to checkout anything. Just apply patch and test.
+        
+        # 1. Apply patch if provided (mirroring run_patch_in_container logic)
+        if KEY_PATCH in instance and instance[KEY_PATCH]:
+            patch_content = instance[KEY_PATCH]
             
-            # Create a sandbox with the repo-specific image
-            sandbox = modal.Sandbox.create(
-                image=repo_image,
-                timeout=60 * 10,  # 10 minutes per instance
-                cpu=2,
+            # Write patch to file in container
+            write_result = sandbox.exec(
+                "sh", "-c", f"cat > /tmp/patch.diff << 'EOF'\n{patch_content}\nEOF",
             )
+            write_result.wait()
             
-            # Run validation commands in the sandbox
-            # 1. Checkout the instance branch
-            checkout_result = sandbox.exec(
-                "git", "checkout", instance_id,
+            # Apply patch using git apply
+            patch_result = sandbox.exec(
+                "git", "apply", "/tmp/patch.diff",
                 workdir=DOCKER_WORKDIR,
             )
-            checkout_result.wait()
+            patch_result.wait()
             
-            if checkout_result.returncode != 0:
-                results.append(ValidationOutput(
+            if patch_result.returncode != 0:
+                error_log = patch_result.stderr.read() if patch_result.stderr else ""
+                return ValidationOutput(
                     instance_id=instance_id,
                     docker_image=docker_image_name,
                     status="fail",
-                    report={"error": "Failed to checkout branch"},
+                    report={"error": "Failed to apply patch"},
                     test_output="",
-                    run_log=checkout_result.stderr,
+                    run_log=error_log,
                     errored=True,
-                ))
-                continue
-            
-            # 2. Apply patch if provided
-            if KEY_PATCH in instance and instance[KEY_PATCH]:
-                # Write patch to file
-                patch_content = instance[KEY_PATCH]
-                write_result = sandbox.exec(
-                    "sh", "-c", f"cat > /tmp/patch.diff << 'EOF'\n{patch_content}\nEOF",
                 )
-                write_result.wait()
-                
-                # Apply patch
-                patch_result = sandbox.exec(
-                    "git", "apply", "/tmp/patch.diff",
-                    workdir=DOCKER_WORKDIR,
-                )
-                patch_result.wait()
-                
-                if patch_result.returncode != 0:
-                    results.append(ValidationOutput(
-                        instance_id=instance_id,
-                        docker_image=docker_image_name,
-                        status="fail",
-                        report={"error": "Failed to apply patch"},
-                        test_output="",
-                        run_log=patch_result.stderr,
-                        errored=True,
-                    ))
-                    continue
-            
-            # 3. Run tests
-            # Get test command from instance or use default
-            test_cmd = instance.get("test_cmd", "pytest tests/")
-            
-            test_result = sandbox.exec(
-                "sh", "-c", test_cmd,
-                workdir=DOCKER_WORKDIR,
-            )
-            test_result.wait()
-            
-            test_output = test_result.stdout + "\n" + test_result.stderr
-            
-            # 4. Parse results (simplified)
-            # In reality, we'd use the repo's log parser here
-            passed_tests = test_output.count("PASSED")
-            failed_tests = test_output.count("FAILED")
-            
+        
+        # 2. Run tests using repo-specific test command
+        # Get test command from instance data (SWE-bench style - no registry needed!)
+        test_command = instance.get("test_cmd", "echo 'No test_cmd found'")
+        
+        # Create eval script (mirrors utils.py lines 211-223)
+        eval_script = "\n".join([
+            "#!/bin/bash",
+            "set -uxo pipefail",
+            f"cd {DOCKER_WORKDIR}",
+            f": '{TEST_OUTPUT_START}'",
+            test_command,
+            f": '{TEST_OUTPUT_END}'",
+        ]) + "\n"
+        
+        # Write eval script to container
+        write_eval_result = sandbox.exec(
+            "sh", "-c", f"cat > /eval.sh << 'EOF'\n{eval_script}\nEOF",
+        )
+        write_eval_result.wait()
+        
+        # Make it executable
+        chmod_result = sandbox.exec("chmod", "+x", "/eval.sh")
+        chmod_result.wait()
+        
+        # Run eval script with bash
+        test_result = sandbox.exec(
+            "/bin/bash", "/eval.sh",
+            workdir=DOCKER_WORKDIR,
+        )
+        test_result.wait()
+        
+        # Extract test output
+        stdout_str = test_result.stdout.read() if test_result.stdout else ""
+        stderr_str = test_result.stderr.read() if test_result.stderr else ""
+        test_output = stdout_str + "\n" + stderr_str
+        
+        # 3. Grade using get_valid_report (mirrors valid.py lines 115-118)
+        # For validation, we compare against reference (no patch) output
+        # Since we don't have pre-gold in Modal yet, use simplified grading
+        # TODO: Implement pre-gold reference runs
+        try:
+            # Try to use get_valid_report if we have reference data
+            # For now, do simplified parsing
             report = {
-                FAIL_TO_PASS: [],  # Would need actual parsing
-                "passed": passed_tests,
-                "failed": failed_tests,
+                FAIL_TO_PASS: [],
+                "test_output_available": True,
             }
             
-            status = "1+_f2p" if passed_tests > 0 else "0_f2p"
+            # Determine status based on test results
+            # If tests ran, consider it 0_f2p (no failures converted to passes without reference)
+            status = "0_f2p"
             
-            results.append(ValidationOutput(
-                instance_id=instance_id,
-                docker_image=docker_image_name,
-                status=status,
-                report=report,
-                test_output=test_output,
-                run_log=test_result.stdout,
-                errored=False,
-            ))
-                
         except Exception as e:
-            print(f"Error validating {instance_id}: {e}")
-            results.append(ValidationOutput(
-                instance_id=instance_id,
-                docker_image=docker_image_name,
-                status="fail",
-                report={"error": str(e)},
-                test_output="",
-                run_log=str(e),
-                errored=True,
-            ))
-        finally:
-            # Clean up sandbox
-            if sandbox is not None:
-                try:
-                    sandbox.terminate()
-                except Exception:
-                    pass  # Ignore cleanup errors
-    
-    return results
+            report = {"error": str(e)}
+            status = "fail"
+        
+        return ValidationOutput(
+            instance_id=instance_id,
+            docker_image=docker_image_name,
+            status=status,
+            report=report,
+            test_output=test_output,
+            run_log=stdout_str,
+            errored=False,
+        )
+            
+    except Exception as e:
+        print(f"Error validating {instance_id}: {e}")
+        return ValidationOutput(
+            instance_id=instance_id,
+            docker_image=docker_image_name,
+            status="fail",
+            report={"error": str(e)},
+            test_output="",
+            run_log=str(e),
+            errored=True,
+        )
+    finally:
+        # Clean up sandbox
+        if sandbox is not None:
+            try:
+                sandbox.terminate()
+            except Exception:
+                pass  # Ignore cleanup errors
 
 
 @app.local_entrypoint()
@@ -259,26 +301,41 @@ def main(
     
     start_time = time.time()
     
-    # Run validation for each Docker image in parallel
+    # Prepare all tasks for parallel execution
     print("\nStarting Modal validation...")
-    all_results = []
+    print(f"Submitting {len(bug_patches_data)} instances for parallel execution...")
     
+    # Create list of (instance_json, docker_image) tuples for all instances
+    tasks = []
+    for docker_image, instances in image_to_instances.items():
+        for instance in instances:
+            tasks.append((json.dumps(instance), docker_image))
+    
+    print(f"Total tasks to run in parallel: {len(tasks)}")
+    
+    # Run all validations in parallel using Modal's .starmap()
     with modal.enable_output():
-        for docker_image, instances in image_to_instances.items():
-            print(f"\nProcessing {len(instances)} instances with {docker_image}...")
-            
-            # Run batch for this Docker image
-            results = run_validation_batch_modal.remote(
-                json.dumps(instances),
-                docker_image,
-            )
-            
-            all_results.extend(results)
+        all_results = list(run_validation_single.starmap(
+            tasks,
+            return_exceptions=True,
+        ))
     
     # Process results
     stats = {"fail": 0, "timeout": 0, "0_f2p": 0, "1+_f2p": 0, "error": 0}
     
     for result in all_results:
+        # Handle exceptions from starmap
+        if isinstance(result, Exception):
+            print(f"Task failed with exception: {result}")
+            stats["error"] += 1
+            continue
+        
+        # Skip if not a ValidationOutput
+        if not isinstance(result, ValidationOutput):
+            print(f"Unexpected result type: {type(result)}")
+            stats["error"] += 1
+            continue
+        
         if result.errored:
             stats["error"] += 1
         else:
