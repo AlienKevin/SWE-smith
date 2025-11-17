@@ -1,6 +1,4 @@
 import pytest
-import tempfile
-import os
 from swesmith.bug_gen.adapters.rust import get_entities_from_file_rs
 from swesmith.bug_gen.procedural.rust.remove import (
     RemoveLoopModifier,
@@ -53,28 +51,23 @@ import random
         ),
     ],
 )
-def test_remove_loop_modifier(src, expected):
+def test_remove_loop_modifier(tmp_path, src, expected):
     """Test that RemoveLoopModifier removes loop statements."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
-        f.write(src)
-        f.flush()
-        temp_path = f.name
+    test_file = tmp_path / "test.rs"
+    test_file.write_text(src, encoding="utf-8")
 
-    try:
-        entities = []
-        get_entities_from_file_rs(entities, temp_path)
-        assert len(entities) == 1
+    entities = []
+    get_entities_from_file_rs(entities, str(test_file))
+    assert len(entities) == 1
 
-        modifier = RemoveLoopModifier(likelihood=1.0, seed=42)
-        modifier.rand = random.Random(42)
-        result = modifier.modify(entities[0])
+    modifier = RemoveLoopModifier(likelihood=1.0, seed=42)
+    modifier.rand = random.Random(42)
+    result = modifier.modify(entities[0])
 
-        assert result is not None
-        assert result.rewrite.strip() == expected.strip(), (
-            f"Expected {expected}, got {result.rewrite}"
-        )
-    finally:
-        os.unlink(temp_path)
+    assert result is not None
+    assert result.rewrite.strip() == expected.strip(), (
+        f"Expected {expected}, got {result.rewrite}"
+    )
 
 
 @pytest.mark.parametrize(
@@ -120,28 +113,23 @@ def test_remove_loop_modifier(src, expected):
         ),
     ],
 )
-def test_remove_conditional_modifier(src, expected):
+def test_remove_conditional_modifier(tmp_path, src, expected):
     """Test that RemoveConditionalModifier removes conditional statements."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
-        f.write(src)
-        f.flush()
-        temp_path = f.name
+    test_file = tmp_path / "test.rs"
+    test_file.write_text(src, encoding="utf-8")
 
-    try:
-        entities = []
-        get_entities_from_file_rs(entities, temp_path)
-        assert len(entities) == 1
+    entities = []
+    get_entities_from_file_rs(entities, str(test_file))
+    assert len(entities) == 1
 
-        modifier = RemoveConditionalModifier(likelihood=1.0, seed=42)
-        modifier.rand = random.Random(42)
-        result = modifier.modify(entities[0])
+    modifier = RemoveConditionalModifier(likelihood=1.0, seed=42)
+    modifier.rand = random.Random(42)
+    result = modifier.modify(entities[0])
 
-        assert result is not None
-        assert result.rewrite.strip() == expected.strip(), (
-            f"Expected {expected}, got {result.rewrite}"
-        )
-    finally:
-        os.unlink(temp_path)
+    assert result is not None
+    assert result.rewrite.strip() == expected.strip(), (
+        f"Expected {expected}, got {result.rewrite}"
+    )
 
 
 @pytest.mark.parametrize(
@@ -193,25 +181,20 @@ def test_remove_conditional_modifier(src, expected):
         ),
     ],
 )
-def test_remove_assign_modifier(src, expected):
+def test_remove_assign_modifier(tmp_path, src, expected):
     """Test that RemoveAssignModifier removes assignment statements."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
-        f.write(src)
-        f.flush()
-        temp_path = f.name
+    test_file = tmp_path / "test.rs"
+    test_file.write_text(src, encoding="utf-8")
 
-    try:
-        entities = []
-        get_entities_from_file_rs(entities, temp_path)
-        assert len(entities) == 1
+    entities = []
+    get_entities_from_file_rs(entities, str(test_file))
+    assert len(entities) == 1
 
-        modifier = RemoveAssignModifier(likelihood=1.0, seed=42)
-        modifier.rand = random.Random(42)
-        result = modifier.modify(entities[0])
+    modifier = RemoveAssignModifier(likelihood=1.0, seed=42)
+    modifier.rand = random.Random(42)
+    result = modifier.modify(entities[0])
 
-        assert result is not None
-        assert result.rewrite.strip() == expected.strip(), (
-            f"Expected {expected}, got {result.rewrite}"
-        )
-    finally:
-        os.unlink(temp_path)
+    assert result is not None
+    assert result.rewrite.strip() == expected.strip(), (
+        f"Expected {expected}, got {result.rewrite}"
+    )

@@ -1,6 +1,4 @@
 import pytest
-import tempfile
-import os
 from swesmith.bug_gen.adapters.rust import get_entities_from_file_rs
 from swesmith.bug_gen.procedural.rust.control_flow import (
     ControlIfElseInvertModifier,
@@ -66,28 +64,23 @@ import random
         ),
     ],
 )
-def test_control_if_else_invert_modifier(src, expected):
+def test_control_if_else_invert_modifier(tmp_path, src, expected):
     """Test that ControlIfElseInvertModifier inverts if-else branches."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
-        f.write(src)
-        f.flush()
-        temp_path = f.name
+    test_file = tmp_path / "test.rs"
+    test_file.write_text(src, encoding="utf-8")
 
-    try:
-        entities = []
-        get_entities_from_file_rs(entities, temp_path)
-        assert len(entities) == 1
+    entities = []
+    get_entities_from_file_rs(entities, str(test_file))
+    assert len(entities) == 1
 
-        modifier = ControlIfElseInvertModifier(likelihood=1.0, seed=42)
-        modifier.rand = random.Random(42)
-        result = modifier.modify(entities[0])
+    modifier = ControlIfElseInvertModifier(likelihood=1.0, seed=42)
+    modifier.rand = random.Random(42)
+    result = modifier.modify(entities[0])
 
-        assert result is not None
-        assert result.rewrite.strip() == expected.strip(), (
-            f"Expected {expected}, got {result.rewrite}"
-        )
-    finally:
-        os.unlink(temp_path)
+    assert result is not None
+    assert result.rewrite.strip() == expected.strip(), (
+        f"Expected {expected}, got {result.rewrite}"
+    )
 
 
 @pytest.mark.parametrize(
@@ -120,25 +113,20 @@ def test_control_if_else_invert_modifier(src, expected):
         ),
     ],
 )
-def test_control_shuffle_lines_modifier(src, expected_variants):
+def test_control_shuffle_lines_modifier(tmp_path, src, expected_variants):
     """Test that ControlShuffleLinesModifier shuffles independent lines."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False) as f:
-        f.write(src)
-        f.flush()
-        temp_path = f.name
+    test_file = tmp_path / "test.rs"
+    test_file.write_text(src, encoding="utf-8")
 
-    try:
-        entities = []
-        get_entities_from_file_rs(entities, temp_path)
-        assert len(entities) == 1
+    entities = []
+    get_entities_from_file_rs(entities, str(test_file))
+    assert len(entities) == 1
 
-        modifier = ControlShuffleLinesModifier(likelihood=1.0, seed=42)
-        modifier.rand = random.Random(42)
-        result = modifier.modify(entities[0])
+    modifier = ControlShuffleLinesModifier(likelihood=1.0, seed=42)
+    modifier.rand = random.Random(42)
+    result = modifier.modify(entities[0])
 
-        assert result is not None
-        assert any(
-            result.rewrite.strip() == variant.strip() for variant in expected_variants
-        ), f"Expected one of {expected_variants}, got {result.rewrite}"
-    finally:
-        os.unlink(temp_path)
+    assert result is not None
+    assert any(
+        result.rewrite.strip() == variant.strip() for variant in expected_variants
+    ), f"Expected one of {expected_variants}, got {result.rewrite}"
