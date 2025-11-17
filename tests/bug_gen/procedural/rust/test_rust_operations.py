@@ -58,7 +58,6 @@ def test_operation_change_modifier(tmp_path, src, expected_variants):
     assert len(entities) == 1
 
     modifier = OperationChangeModifier(likelihood=1.0, seed=42)
-    modifier.rand = random.Random(42)
 
     found_variant = False
     for _ in range(20):
@@ -126,7 +125,6 @@ def test_operation_flip_operator_modifier(tmp_path, src, expected):
     assert len(entities) == 1
 
     modifier = OperationFlipOperatorModifier(likelihood=1.0, seed=42)
-    modifier.rand = random.Random(42)
     result = modifier.modify(entities[0])
 
     assert result is not None
@@ -174,7 +172,6 @@ def test_operation_swap_operands_modifier(tmp_path, src, expected):
     assert len(entities) == 1
 
     modifier = OperationSwapOperandsModifier(likelihood=1.0, seed=42)
-    modifier.rand = random.Random(42)
     result = modifier.modify(entities[0])
 
     assert result is not None
@@ -207,7 +204,6 @@ def test_operation_break_chains_modifier(tmp_path, src, expected_variants):
     assert len(entities) == 1
 
     modifier = OperationBreakChainsModifier(likelihood=1.0, seed=42)
-    modifier.rand = random.Random(42)
     result = modifier.modify(entities[0])
 
     assert result is not None
@@ -264,7 +260,6 @@ def test_operation_change_constants_modifier(tmp_path, src, expected_variants):
     assert len(entities) == 1
 
     modifier = OperationChangeConstantsModifier(likelihood=1.0, seed=42)
-    modifier.rand = random.Random(42)
     result = modifier.modify(entities[0])
 
     assert result is not None

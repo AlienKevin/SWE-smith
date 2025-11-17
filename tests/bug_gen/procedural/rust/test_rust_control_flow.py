@@ -74,7 +74,6 @@ def test_control_if_else_invert_modifier(tmp_path, src, expected):
     assert len(entities) == 1
 
     modifier = ControlIfElseInvertModifier(likelihood=1.0, seed=42)
-    modifier.rand = random.Random(42)
     result = modifier.modify(entities[0])
 
     assert result is not None
@@ -123,7 +122,6 @@ def test_control_shuffle_lines_modifier(tmp_path, src, expected_variants):
     assert len(entities) == 1
 
     modifier = ControlShuffleLinesModifier(likelihood=1.0, seed=42)
-    modifier.rand = random.Random(42)
     result = modifier.modify(entities[0])
 
     assert result is not None

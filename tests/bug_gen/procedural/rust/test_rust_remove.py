@@ -61,7 +61,6 @@ def test_remove_loop_modifier(tmp_path, src, expected):
     assert len(entities) == 1
 
     modifier = RemoveLoopModifier(likelihood=1.0, seed=42)
-    modifier.rand = random.Random(42)
     result = modifier.modify(entities[0])
 
     assert result is not None
@@ -123,7 +122,6 @@ def test_remove_conditional_modifier(tmp_path, src, expected):
     assert len(entities) == 1
 
     modifier = RemoveConditionalModifier(likelihood=1.0, seed=42)
-    modifier.rand = random.Random(42)
     result = modifier.modify(entities[0])
 
     assert result is not None
@@ -191,7 +189,6 @@ def test_remove_assign_modifier(tmp_path, src, expected):
     assert len(entities) == 1
 
     modifier = RemoveAssignModifier(likelihood=1.0, seed=42)
-    modifier.rand = random.Random(42)
     result = modifier.modify(entities[0])
 
     assert result is not None
