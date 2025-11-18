@@ -275,7 +275,8 @@ class IssueGen:
             with open(output_file, "w") as f_:
                 json.dump(metadata, f_, indent=4)
         else:
-            # If messages already exist, get repos_to_remove from existing metadata
+            # If messages already exist, retrieve them from metadata
+            messages = metadata["messages"]
             _, repos_to_remove = self.get_test_functions(instance_curr)
 
         # Generate n_instructions completions containing problem statements
