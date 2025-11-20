@@ -8,7 +8,6 @@ from swesmith.bug_gen.procedural.rust.operations import (
     OperationChangeConstantsModifier,
     FLIPPED_OPERATORS,
 )
-import random
 
 
 @pytest.mark.parametrize(

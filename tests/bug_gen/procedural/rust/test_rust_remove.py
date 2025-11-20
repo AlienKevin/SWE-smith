@@ -5,7 +5,6 @@ from swesmith.bug_gen.procedural.rust.remove import (
     RemoveConditionalModifier,
     RemoveAssignModifier,
 )
-import random
 
 
 @pytest.mark.parametrize(

@@ -4,7 +4,6 @@ from swesmith.bug_gen.procedural.rust.control_flow import (
     ControlIfElseInvertModifier,
     ControlShuffleLinesModifier,
 )
-import random
 
 
 @pytest.mark.parametrize(
