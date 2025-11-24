@@ -60,9 +60,9 @@ echo "[Step 4/5] Generating agent trajectories..."
 # Remember to set CLAUDE_API_KEY or CLAUDE_API_KEY_ROTATION environment variable
 sweagent run-batch --num_workers 10 \
     --instances.deployment.docker_args=--memory=10g \
-    --config agent/swesmith_gen_claude.yaml \
+    --config agent/swesmith_gen_kimi.yaml \
     --instances.path logs/task_insts/$repo.json \
-    --output_dir trajectories/swesmith_gen__claude-3.7__$repo \
+    --output_dir trajectories/swesmith_gen__kimi__$repo \
     --random_delay_multiplier=1 \
     --agent.model.temperature 0.0
 
