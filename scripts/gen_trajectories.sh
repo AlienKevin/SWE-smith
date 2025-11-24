@@ -66,6 +66,15 @@ sweagent run-batch --num_workers 10 \
     --random_delay_multiplier=1 \
     --agent.model.temperature 0.0
 
+# Step 5: Evaluate generated trajectories
+echo ""
+echo "[Step 5/5] Running evaluation (evaluating generated trajectories)..."
+python -m swesmith.harness.eval \
+    --dataset_path logs/task_insts/$repo.json \
+    --predictions_path trajectories/swesmith_gen__glm__$repo/preds.json \
+    --run_id swesmith_gen__glm__$repo \
+    --workers 10
+
 echo ""
 echo "===================================="
 echo "Pipeline Complete!"
