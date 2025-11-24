@@ -26,18 +26,18 @@ fi
 
 # Step 0: Ensure mirror repository exists
 echo ""
-echo "[Step 0/5] Creating mirror repository..."
+echo "[Step 0/6] Creating mirror repository..."
 python -c "from swesmith.profiles import registry; registry.get('$repo').create_mirror()"
 echo "✓ Mirror repository ready"
 
 # Step 1: Collect task instances with 1+ Fail-to-Pass tests
 echo ""
-echo "[Step 1/5] Gathering validated task instances..."
+echo "[Step 1/6] Gathering validated task instances..."
 python -m swesmith.harness.gather logs/run_validation/$repo --override_branch --debug_subprocess
 
 # Step 2: Run evaluation to generate gold trajectories
 echo ""
-echo "[Step 2/5] Running evaluation (generating gold trajectories)..."
+echo "[Step 2/6] Running evaluation (generating gold trajectories)..."
 python -m swesmith.harness.eval \
     --dataset_path logs/task_insts/$repo.json \
     --predictions_path gold \
@@ -45,7 +45,7 @@ python -m swesmith.harness.eval \
 
 # Step 3: Generate issues for the task instances
 echo ""
-echo "[Step 3/5] Generating issue descriptions..."
+echo "[Step 3/6] Generating issue descriptions..."
 python -m swesmith.issue_gen.generate \
     --dataset_path logs/task_insts/$repo.json \
     --config_file configs/issue_gen/ig_v2.yaml \
@@ -56,7 +56,7 @@ python -m swesmith.issue_gen.generate \
 # NOTE: SWE-agent must be installed separately: pip install sweagent
 # Uncomment and configure the following when ready:
 echo ""
-echo "[Step 4/5] Generating agent trajectories..."
+echo "[Step 4/6] Generating agent trajectories..."
 # Remember to set CLAUDE_API_KEY or CLAUDE_API_KEY_ROTATION environment variable
 sweagent run-batch --num_workers 10 \
     --instances.deployment.docker_args=--memory=10g \
@@ -68,12 +68,19 @@ sweagent run-batch --num_workers 10 \
 
 # Step 5: Evaluate generated trajectories
 echo ""
-echo "[Step 5/5] Running evaluation (evaluating generated trajectories)..."
+echo "[Step 5/6] Running evaluation (evaluating generated trajectories)..."
 python -m swesmith.harness.eval \
     --dataset_path logs/task_insts/$repo.json \
     --predictions_path trajectories/swesmith_gen__glm__$repo/preds.json \
     --run_id swesmith_gen__glm__$repo \
     --workers 10
+
+# Step 6: Collect trajectories for SFT
+echo ""
+echo "[Step 6/6] Collecting trajectories for SFT..."
+python -m swesmith.train.traj_mgr.collect_trajs \
+    --traj_dir trajectories/swesmith_gen__glm__$repo \
+    --eval_dir logs/run_evaluation/swesmith_gen__glm__$repo
 
 echo ""
 echo "===================================="
