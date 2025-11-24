@@ -150,6 +150,12 @@ def run_patch_in_container(
         # If provided, checkout commit in container
         if commit is not None:
             logger.info(f"Checking out commit {commit}")
+            origin_url = container.exec_run("git remote get-url origin", workdir=DOCKER_WORKDIR, user=DOCKER_USER)
+            logger.info(f"Original git remote origin_url: {origin_url.output.decode(UTF8)}")
+            origin_url = origin_url.output.decode(UTF8).strip()
+            container.exec_run(f"git remote set-url origin {origin_url.replace('swesmith', 'swe-smith')}", workdir=DOCKER_WORKDIR, user=DOCKER_USER)
+            new_origin_url = container.exec_run("git remote get-url origin", workdir=DOCKER_WORKDIR, user=DOCKER_USER)
+            logger.info(f"New git remote origin_url: {new_origin_url.output.decode(UTF8)}")
             container.exec_run("git fetch", workdir=DOCKER_WORKDIR, user=DOCKER_USER)
             val = container.exec_run(
                 f"git checkout {commit}", workdir=DOCKER_WORKDIR, user=DOCKER_USER
@@ -157,20 +163,22 @@ def run_patch_in_container(
             if val.exit_code != 0:
                 logger.info(f"CHECKOUT FAILED: {val.output.decode(UTF8)}")
                 return logger, False
-            if is_eval:
-                # NOTE: Key assumption we make is that each branch has two commits
-                # 1. Bug commit
-                # 2. F2P Test File(s) removal commit (on top of 1).
-                # The `HEAD~1` corresponds to reverting the branch to (1), which
-                # effectively brings the tests back into the codebase.
-                val = container.exec_run(
-                    "git checkout HEAD~1", workdir=DOCKER_WORKDIR, user=DOCKER_USER
-                )
-                if val.exit_code != 0:
-                    logger.info(
-                        f"CHECKOUT TO BUG STAGE FAILED: {val.output.decode(UTF8)}"
-                    )
-                    return logger, False
+
+            # TODO (kevin): We only have 1 bug commit for some reason
+            # if is_eval:
+            #     # NOTE: Key assumption we make is that each branch has two commits
+            #     # 1. Bug commit
+            #     # 2. F2P Test File(s) removal commit (on top of 1).
+            #     # The `HEAD~1` corresponds to reverting the branch to (1), which
+            #     # effectively brings the tests back into the codebase.
+            #     val = container.exec_run(
+            #         "git checkout HEAD~1", workdir=DOCKER_WORKDIR, user=DOCKER_USER
+            #     )
+            #     if val.exit_code != 0:
+            #         logger.info(
+            #             f"CHECKOUT TO BUG STAGE FAILED: {val.output.decode(UTF8)}"
+            #         )
+            #         return logger, False
 
         # If provided, copy patch to container and apply it to codebase
         if patch is not None and len(patch) >= 1:
