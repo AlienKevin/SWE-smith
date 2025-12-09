@@ -118,7 +118,8 @@ agent:
   model:
     api_key: swesmith
     api_base: https://swe-b--example-vllm-inference-serve.modal.run/v1
-    name: openai/SWE-bench/SWE-agent-LM-32B
+    # name: openai/SWE-bench/SWE-agent-LM-32B
+    name: openai/Qwen/Qwen2.5-Coder-32B-Instruct
     per_instance_cost_limit: 0
     total_cost_limit: 0
     per_instance_call_limit: 75
