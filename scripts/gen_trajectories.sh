@@ -3,18 +3,13 @@
 
 # Define excluded repositories (Owner__Repo format)
 EXCLUDED_REPOS=(
-    "BurntSushi__ripgrep"
-    "BurntSushi__rust-csv"
-    "dtolnay__anyhow"
-    "clap-rs__clap"
-    "nushell__nushell"
-    "serde-rs__serde"
-    "sharkdp__bat"
-    "sharkdp__fd"
-    "rayon-rs__rayon"
-    "tokio-rs__bytes"
     "tokio-rs__tokio"
-    "tokio-rs__tracing"
+    "uutils__coreutils"
+    "nushell__nushell"
+    "tokio-rs__axum"
+    "BurntSushi__ripgrep"
+    "sharkdp__bat"
+    "astral-sh__ruff"
 )
 
 # Determine optimal number of workers
