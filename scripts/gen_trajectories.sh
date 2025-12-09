@@ -104,6 +104,14 @@ for repo_dir in logs/bug_gen/*; do
         continue
     fi
 
+    # Step 3.2: Consolidate issues (problem_statement) back to task instances
+    echo ""
+    echo "[Step 3.2/6] Consolidating issue descriptions..."
+    if ! python -m swesmith.issue_gen.consolidate logs/task_insts/$repo.json; then
+        echo "❌ Step 3.2 failed: Issue consolidation failed for $repo"
+        continue
+    fi
+
     # Step 4: Generate agent trajectories using SWE-agent
     # NOTE: SWE-agent must be installed separately: pip install sweagent
     # Uncomment and configure the following when ready:
