@@ -117,14 +117,10 @@ def consolidate(dataset_path: str, output_path: str | None = None, model: str | 
             missing_count += 1
             continue
 
-        # Expand instances
-        for i, stmt in enumerate(problem_statements):
+        # Expand instances, picking first statement
+        for stmt in problem_statements[:1]:
             new_inst = instance.copy()
             new_inst["problem_statement"] = stmt
-            
-            # If we have multiple statements, we must produce unique instance IDs
-            if len(problem_statements) > 1:
-                new_inst[KEY_INSTANCE_ID] = f"{instance_id}_n{i}"
             
             new_data.append(new_inst)
             consolidated_count += 1
