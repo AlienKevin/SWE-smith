@@ -7,4 +7,4 @@ curl https://swe-b--example-vllm-inference-serve.modal.run/v1/chat/completions \
     ]
   }'
 
-time uv run sweagent run-batch --config agent/swesmith_infer.yaml >> swebench_multilingual_rust_qwen2.5-coder-32b-instruct.log 2>&1
+time uv run sweagent run-batch --config agent/swesmith_infer.yaml >> swebench_multilingual_rust_swe_agent_lm_32b_rust_268.log 2>&1
