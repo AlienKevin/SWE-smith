@@ -32,18 +32,41 @@ agent:
     next_step_no_output_template: |-
       Your command ran successfully and did not produce any output.
   tools:
-    execution_timeout: 300
     bundles:
       - path: tools/registry
       - path: tools/edit_anthropic
-      - path: tools/submit
-    env_variables:
+      - path: tools/review_on_submit_m
+    registry_variables:
       USE_FILEMAP: 'true'
+      SUBMIT_REVIEW_MESSAGES:
+        - |
+          Thank you for your work on this issue. Please carefully follow the steps below to help review your changes.
+
+          1. If you made any changes to your code after running the reproduction script, please run the reproduction script again.
+            If the reproduction script is failing, please revisit your changes and make sure they are correct.
+            If you have already removed your reproduction script, please ignore this step.
+          2. Remove your reproduction script (if you haven't done so already).
+          3. If you have modified any TEST files, please revert them to the state they had before you started fixing the issue.
+            You can do this with `git checkout -- /path/to/test/file.py`. Use below <diff> to find the files you need to revert.
+          4. Run the submit command again to confirm.
+
+          Here is a list of all of your changes:
+
+          <diff>
+          {{diff}}
+          </diff>
     enable_bash_tool: true
     parse_function:
       type: function_calling
+    execution_timeout: 300
+  history_processors:
+    - type: cache_control
+      last_n_messages: 2
   model:
-    name: gpt-4o-2024-08-06
+    name: openai/portkey/gpt-5-mini
+    max_output_tokens: 64000
+    api_key: $PORTKEY_API_KEY
+    api_base: https://api.portkey.ai/v1
     per_instance_cost_limit: 2.
-    per_instance_call_limit: 75
+    per_instance_call_limit: 30
     # delay: 1
