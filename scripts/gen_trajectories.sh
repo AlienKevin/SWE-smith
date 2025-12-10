@@ -120,9 +120,9 @@ for repo_dir in logs/bug_gen/*; do
     # Remember to set CLAUDE_API_KEY or CLAUDE_API_KEY_ROTATION environment variable
     if ! sweagent run-batch --num_workers $NUM_WORKERS \
         --instances.deployment.docker_args=--memory=10g \
-        --config agent/swesmith_gen_gpt.yaml \
+        --config agent/swesmith_gen_glm.yaml \
         --instances.path logs/task_insts/$repo.json \
-        --output_dir trajectories/swesmith_gen__gpt__$repo \
+        --output_dir trajectories/swesmith_gen__glm__$repo \
         --random_delay_multiplier=1 \
         --agent.model.temperature 0.0; then
         echo "❌ Step 4 failed: Agent trajectory generation failed for $repo"
@@ -134,8 +134,8 @@ for repo_dir in logs/bug_gen/*; do
     echo "[Step 5/6] Running evaluation (evaluating generated trajectories)..."
     if ! python -m swesmith.harness.eval \
         --dataset_path logs/task_insts/$repo.json \
-        --predictions_path trajectories/swesmith_gen__gpt__$repo/preds.json \
-        --run_id swesmith_gen__gpt__$repo \
+        --predictions_path trajectories/swesmith_gen__glm__$repo/preds.json \
+        --run_id swesmith_gen__glm__$repo \
         --workers $NUM_WORKERS; then
         echo "❌ Step 5 failed: Evaluation of generated trajectories failed for $repo"
         continue
@@ -145,8 +145,8 @@ for repo_dir in logs/bug_gen/*; do
     echo ""
     echo "[Step 6/6] Collecting trajectories for SFT..."
     if ! python -m swesmith.train.traj_mgr.collect_trajs \
-        --traj_dir trajectories/swesmith_gen__gpt__$repo \
-        --eval_dir logs/run_evaluation/swesmith_gen__gpt__$repo \
+        --traj_dir trajectories/swesmith_gen__glm__$repo \
+        --eval_dir logs/run_evaluation/swesmith_gen__glm__$repo \
         --workers $NUM_WORKERS; then
         echo "❌ Step 6 failed: Trajectory collection failed for $repo"
         continue

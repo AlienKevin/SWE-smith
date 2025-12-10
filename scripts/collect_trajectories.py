@@ -5,9 +5,9 @@ import os
 
 def main():
     # Input directory containing the trajectory files
-    input_dir = "trajectories_gpt_sft"
+    input_dir = "trajectories_glm_sft"
     # Output file path
-    output_file = "trajectories_gpt_sft.jsonl"
+    output_file = "trajectories_glm_sft.jsonl"
     
     # Check if input directory exists
     if not os.path.exists(input_dir):
