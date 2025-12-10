@@ -121,7 +121,8 @@ agent:
     # name: openai/SWE-bench/SWE-agent-LM-32B
     # name: openai/Qwen/Qwen2.5-Coder-32B-Instruct
     # name: openai/SWE-agent-LM-32B-Rust-268
-    name: openai/SWE-agent-LM-32B-Rust-gpt-91-epoch-0
+    # name: openai/SWE-agent-LM-32B-Rust-gpt-91-epoch-0
+    name: openai/SWE-agent-LM-32B-Rust-glm-142-epoch-2
     per_instance_cost_limit: 0
     total_cost_limit: 0
     per_instance_call_limit: 75

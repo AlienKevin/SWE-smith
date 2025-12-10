@@ -2,7 +2,7 @@ import os
 import json
 import glob
 
-target_dir = "SWE-agent/trajectories/ubuntu/swesmith_infer__openai--SWE-agent-LM-32B-Rust-268__t-0.00__p-1.00__c-0.00___swe_bench_multilingual_rust"
+target_dir = "SWE-agent/trajectories/ubuntu/swesmith_infer__openai--SWE-agent-LM-32B-Rust-glm-142-epoch-2__t-0.00__p-1.00__c-0.00___swe_bench_multilingual_rust"
 output_file = os.path.join(target_dir, "preds.json")
 
 preds = {}
