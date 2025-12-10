@@ -19,6 +19,7 @@ def main():
     print(f"Found {len(files)} files in {input_dir}")
 
     count = 0
+    total_count = 0
     with open(output_file, 'w') as outfile:
         for filename in files:
             with open(filename, 'r') as infile:
@@ -27,6 +28,7 @@ def main():
                         continue
                     try:
                         data = json.loads(line)
+                        total_count += 1
                         # Filter out those with resolved = False (keep resolved = True)
                         # The key in the JSON is observed to be "resolved"
                         if data.get("resolved") is True:
@@ -36,6 +38,8 @@ def main():
                         print(f"Error decoding JSON in file: {filename}")
                         continue
     
+    print(f"Resolved trajectories: {count}")
+    print(f"Total trajectories generated: {total_count}")
     print(f"Collected {count} resolved trajectories into {output_file}")
 
 if __name__ == "__main__":
