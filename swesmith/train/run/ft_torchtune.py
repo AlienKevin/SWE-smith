@@ -30,8 +30,8 @@ dataset_volume = modal.Volume.from_name("data", create_if_missing=True)
 
 MINUTES = 60  # seconds
 HOURS = 60 * MINUTES
-N_GPUS = int(os.environ.get("N_GPUS", 2))
-N_HOURS = int(os.environ.get("N_HOURS", 10))
+N_GPUS = int(os.environ.get("N_GPUS", 8))
+N_HOURS = int(os.environ.get("N_HOURS", 4))
 
 
 @app.function(
@@ -44,8 +44,8 @@ N_HOURS = int(os.environ.get("N_HOURS", 10))
     },
     timeout=N_HOURS * HOURS,
     secrets=[
-        modal.Secret.from_name("john-wandb-secret"),
-        modal.Secret.from_name("john-hf-secret"),
+        modal.Secret.from_name("kevin-wandb-secret"),
+        modal.Secret.from_name("kevin-hf-secret"),
     ],
 )
 def run_train(config_name: str, config: dict, n_gpus: int):

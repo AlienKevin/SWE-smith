@@ -58,7 +58,7 @@ resume_from_checkpoint: False
 dataset:
   _component_: torchtune.datasets.chat_dataset
   source: json
-  data_files: /data/archive/swesmith.trajs.250413.jsonl
+  data_files: /data/trajectories_gpt_sft.jsonl
   split: train
   conversation_column: messages
   conversation_style: openai
