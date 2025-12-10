@@ -109,13 +109,9 @@ def main(
                 if limit_per_file != -1 and success >= limit_per_file:
                     break
 
-                # Remove any remaining lists in `combos` that contain any file in combo
-                used_files = set(combo)
-                combos = [c for c in combos if not any(f in used_files for f in c)]
-                i = 0
             else:
                 fails += 1
-                i += 1
+            i += 1
 
         total_success += success
         total_fails += fails

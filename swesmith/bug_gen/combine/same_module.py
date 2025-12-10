@@ -211,13 +211,13 @@ def main(
                     )
                 if limit_per_module != -1 and success >= limit_per_module:
                     break
-                # Regenerate combos from unused patches
-                patches = [p for p in patches if p not in set(combo)]
-                combos = get_combos(patches, num_patches, max_combos)
-                i = 0
+                # # Regenerate combos from unused patches
+                # patches = [p for p in patches if p not in set(combo)]
+                # combos = get_combos(patches, num_patches, max_combos)
+                # i = 0
             else:
                 total_fails += 1
-                i += 1
+            i += 1
         total_success += success
 
     print(f"{repo}: {total_success} successes, {total_fails} fails")
