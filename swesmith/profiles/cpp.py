@@ -97,7 +97,7 @@ class Spdlog8806ca65(CppProfile):
         print(f"[DEBUG] Mirror name: {self.mirror_name}")
         print(f"[DEBUG] Repo name: {self.repo_name}")
         print(f"[DEBUG] Org GH: {self.org_gh}")
-        
+
         return f"""FROM gcc:12
 RUN apt-get update && apt-get install -y \
     clang build-essential cmake \
@@ -163,7 +163,9 @@ class Eigen9b00db8c(CppProfile):
     repo: str = "eigen"
     commit: str = "9b00db8cb9154477b93b342cf418b5da5d7f58a0"
     test_cmd: str = "cd build && ctest"
-    timeout: int = 1800  # 30 minutes - Eigen test suite is large and can take a long time
+    timeout: int = (
+        1800  # 30 minutes - Eigen test suite is large and can take a long time
+    )
     timeout_ref: int = 3600  # 60 minutes for reference runs
     org_dh: str = "zhehaoli1999"  # Docker Hub username
     org_gh: str = "zhehaoli1999"  # GitHub username (for personal account)
@@ -176,7 +178,7 @@ class Eigen9b00db8c(CppProfile):
         print(f"[DEBUG] Mirror name: {self.mirror_name}")
         print(f"[DEBUG] Repo name: {self.repo_name}")
         print(f"[DEBUG] Org GH: {self.org_gh}")
-        
+
         return f"""FROM gcc:12
 RUN apt-get update && apt-get install -y \
     git clang build-essential cmake \
@@ -260,7 +262,7 @@ class FmtEc73fb72(CppProfile):
         print(f"[DEBUG] Mirror name: {self.mirror_name}")
         print(f"[DEBUG] Repo name: {self.repo_name}")
         print(f"[DEBUG] Org GH: {self.org_gh}")
-        
+
         return f"""FROM gcc:12
 RUN apt-get update && apt-get install -y \
     git clang build-essential cmake \
