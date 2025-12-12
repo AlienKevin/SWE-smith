@@ -33,6 +33,6 @@ MODIFIERS_CPP: list[ProceduralModifier] = [
     OperationChangeConstantsModifier(likelihood=0.3),
     OperationChangeModifier(likelihood=1.0),
     OperationFlipOperatorModifier(likelihood=1.0),
-    OperationSwapOperandsModifier(likelihood =1.0),
+    OperationSwapOperandsModifier(likelihood=1.0),
     ReplaceStringTypoModifier(likelihood=1.0),
 ]

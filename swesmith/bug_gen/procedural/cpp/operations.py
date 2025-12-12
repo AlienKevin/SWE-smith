@@ -29,8 +29,16 @@ FLIPPED_OPERATORS = {
 AGGRESSIVE_ARITHMETIC_TRANSFORMS = {
     "+": ["-", "*", "/"],  # Addition -> subtraction, multiplication, or division
     "-": ["+", "*", "/"],  # Subtraction -> addition, multiplication, or division
-    "*": ["/", "-", "+"],  # Multiplication -> division (can cause div by zero), subtraction, or addition
-    "/": ["*", "+", "-"],  # Division -> multiplication (can cause overflow), addition, or subtraction
+    "*": [
+        "/",
+        "-",
+        "+",
+    ],  # Multiplication -> division (can cause div by zero), subtraction, or addition
+    "/": [
+        "*",
+        "+",
+        "-",
+    ],  # Division -> multiplication (can cause overflow), addition, or subtraction
     "%": ["/", "*", "-"],  # Modulo -> division, multiplication, or subtraction
 }
 
@@ -187,7 +195,11 @@ class OperationFlipOperatorModifier(CppProceduralModifier):
             # We need to look for operators in the structure
             for child in node.children:
                 # Check for all comparison and logical operators
-                if child.type in FLIPPED_OPERATORS or child.type in COMPARISON_OPS or child.type in LOGICAL_OPS:
+                if (
+                    child.type in FLIPPED_OPERATORS
+                    or child.type in COMPARISON_OPS
+                    or child.type in LOGICAL_OPS
+                ):
                     candidates.append(child)
         for child in node.children:
             self._find_flippable_operators(child, candidates)
@@ -328,7 +340,11 @@ class OperationChangeConstantsModifier(CppProceduralModifier):
                 ]
                 new_value = random.choice(transformations)
                 # Ensure we don't create invalid values
-                if new_value < 0 and original.startswith("0x") and "u" in original.lower():
+                if (
+                    new_value < 0
+                    and original.startswith("0x")
+                    and "u" in original.lower()
+                ):
                     # Unsigned hex, keep positive
                     new_value = abs(new_value)
 

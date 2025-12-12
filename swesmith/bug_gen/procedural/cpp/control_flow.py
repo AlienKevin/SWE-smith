@@ -73,7 +73,9 @@ class ControlIfElseInvertModifier(CppProceduralModifier):
                         # Handle else-if: extract the if body as else body
                         for subchild in else_node.children:
                             if subchild.type == "compound_statement":
-                                else_body = code[subchild.start_byte : subchild.end_byte]
+                                else_body = code[
+                                    subchild.start_byte : subchild.end_byte
+                                ]
                                 break
 
         if condition and if_body:
@@ -114,7 +116,7 @@ class ControlIfElseInvertModifier(CppProceduralModifier):
                 if child.type == "else":
                     has_else = True
                     break
-            
+
             # Only add if statements without else
             if not has_else:
                 candidates.append(node)
