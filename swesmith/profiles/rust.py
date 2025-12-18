@@ -43,13 +43,6 @@ RUN {self.test_cmd} || true
 
 
 @dataclass
-class Anyhow1d7ef1db(RustProfile):
-    owner: str = "dtolnay"
-    repo: str = "anyhow"
-    commit: str = "1d7ef1db5414ac155ad6254685673c90ea4c7d77"
-
-
-@dataclass
 class Base64cac5ff84(RustProfile):
     owner: str = "marshallpierce"
     repo: str = "rust-base64"
@@ -176,13 +169,6 @@ class Rpds3e7c8ae6(RustProfile):
     owner: str = "orium"
     repo: str = "rpds"
     commit: str = "3e7c8ae693cdc6e1b255c87279b6ad8aded6401d"
-
-
-@dataclass
-class Rayon1fd20485(RustProfile):
-    owner: str = "rayon-rs"
-    repo: str = "rayon"
-    commit: str = "1fd20485bd0bb55541d8080a31e104c7b758cb48"
 
 
 @dataclass
@@ -330,6 +316,13 @@ class Pastelb60e8993(RustProfile):
 
 
 @dataclass
+class Anyhow2c0bda4c(RustProfile):
+    owner: str = "dtolnay"
+    repo: str = "anyhow"
+    commit: str = "2c0bda4ce944d943e7141f0316b0ea996602238e"
+
+
+@dataclass
 class Cxx0d80b351(RustProfile):
     owner: str = "dtolnay"
     repo: str = "cxx"
@@ -383,6 +376,13 @@ class Rhai6b132e55(RustProfile):
     owner: str = "rhaiscript"
     repo: str = "rhai"
     commit: str = "6b132e55167e6fc82a2348e90d507141e1204a12"
+
+
+@dataclass
+class Rayon5b4eb339(RustProfile):
+    owner: str = "rayon-rs"
+    repo: str = "rayon"
+    commit: str = "5b4eb339c06943cbb71d8368e78343c049e6d71c"
 
 
 @dataclass
