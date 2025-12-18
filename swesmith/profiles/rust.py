@@ -330,13 +330,6 @@ class Pastelb60e8993(RustProfile):
 
 
 @dataclass
-class Anyhow2c0bda4c(RustProfile):
-    owner: str = "dtolnay"
-    repo: str = "anyhow"
-    commit: str = "2c0bda4ce944d943e7141f0316b0ea996602238e"
-
-
-@dataclass
 class Cxx0d80b351(RustProfile):
     owner: str = "dtolnay"
     repo: str = "cxx"
@@ -390,13 +383,6 @@ class Rhai6b132e55(RustProfile):
     owner: str = "rhaiscript"
     repo: str = "rhai"
     commit: str = "6b132e55167e6fc82a2348e90d507141e1204a12"
-
-
-@dataclass
-class Rayon5b4eb339(RustProfile):
-    owner: str = "rayon-rs"
-    repo: str = "rayon"
-    commit: str = "5b4eb339c06943cbb71d8368e78343c049e6d71c"
 
 
 @dataclass
