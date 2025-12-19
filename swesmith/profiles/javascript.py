@@ -740,7 +740,7 @@ RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
 RUN git clone https://github.com/{self.owner}/{self.repo}.git /testbed
 WORKDIR /testbed
-RUN git checkout 0a6afa5a6107c0c8baf4722e29de7566f33d1651
+RUN git checkout {self.commit}
 
 RUN npm install
 
@@ -828,7 +828,7 @@ RUN apt-get update && apt-get install -y \
 # Clone the repository
 RUN git clone https://github.com/{self.owner}/{self.repo}.git /testbed
 WORKDIR /testbed
-RUN git checkout a9de220ba9e65bdea540fb5322ffb1da2b0bf442
+RUN git checkout {self.commit}
 
 # Install dependencies
 RUN npm install
@@ -909,7 +909,7 @@ RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 # Clone the repository
 RUN git clone https://github.com/{self.owner}/{self.repo}.git /testbed
 WORKDIR /testbed
-RUN git checkout a4ace10dc3ff182828cd3ee7469f6667e08ceb62
+RUN git checkout {self.commit}
 
 # Install dependencies using yarn (yarn.lock is present)
 RUN yarn install --frozen-lockfile
@@ -939,7 +939,7 @@ RUN apt-get update && apt-get install -y \
 
 RUN git clone https://github.com/{self.owner}/{self.repo}.git /testbed
 WORKDIR /testbed
-RUN git checkout 32aecfaa424609ba35829f645138f182f3273dce
+RUN git checkout {self.commit}
 
 RUN npm install
 
@@ -993,7 +993,7 @@ RUN apt-get update && apt-get install -y git python3 make g++ && rm -rf /var/lib
 
 RUN git clone https://github.com/{self.owner}/{self.repo}.git /testbed
 WORKDIR /testbed
-RUN git checkout 80e09d1a267ed2283e6d58a643800d3d632372a7
+RUN git checkout {self.commit}
 
 RUN npm run setup
 
