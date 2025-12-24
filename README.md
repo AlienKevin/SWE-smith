@@ -3,9 +3,11 @@
     <img src="docs/assets/banner.png" style="height: 10em" alt="Kawhi the SWE-smith" />
   </a>
 </p>
-
 <br>
-
+<div align="center">
+<strong>NeurIPS 2025 Datasets & Benchmarks Track - Spotlight 🔦</strong>
+</div>
+<br>
 <div align="center">
 <a href="https://www.python.org/">
   <img alt="Build" src="https://img.shields.io/badge/Python-3.10+-1f425f.svg?color=purple">
