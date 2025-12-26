@@ -1414,7 +1414,7 @@ RUN npm install
 CMD ["/bin/bash"]"""
 
     def log_parser(self, log: str) -> dict[str, str]:
-        return parse_log_jest(log)
+        return parse_log_mocha(log)
 
 
 @dataclass
