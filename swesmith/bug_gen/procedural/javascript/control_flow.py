@@ -21,9 +21,6 @@ class ControlIfElseInvertModifier(JavaScriptProceduralModifier):
 
     def modify(self, code_entity: CodeEntity) -> BugRewrite:
         """Swap if and else blocks."""
-        if not self.flip():
-            return None
-
         # Parse the code
         parser = Parser(JS_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
@@ -136,9 +133,6 @@ class ControlShuffleLinesModifier(JavaScriptProceduralModifier):
 
     def modify(self, code_entity: CodeEntity) -> BugRewrite:
         """Shuffle statements within a function body."""
-        if not self.flip():
-            return None
-
         # Parse the code
         parser = Parser(JS_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))

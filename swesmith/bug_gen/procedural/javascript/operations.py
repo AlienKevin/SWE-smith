@@ -20,8 +20,6 @@ class OperationChangeModifier(JavaScriptProceduralModifier):
 
     def modify(self, code_entity: CodeEntity) -> BugRewrite:
         """Change operators to others in their group."""
-        if not self.flip():
-            return None
 
         parser = Parser(JS_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
@@ -101,8 +99,6 @@ class OperationFlipOperatorModifier(JavaScriptProceduralModifier):
 
     def modify(self, code_entity: CodeEntity) -> BugRewrite:
         """Flip operators to their opposites."""
-        if not self.flip():
-            return None
 
         parser = Parser(JS_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
@@ -182,8 +178,6 @@ class OperationSwapOperandsModifier(JavaScriptProceduralModifier):
 
     def modify(self, code_entity: CodeEntity) -> BugRewrite:
         """Swap left and right operands."""
-        if not self.flip():
-            return None
 
         parser = Parser(JS_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
@@ -267,8 +261,6 @@ class OperationChangeConstantsModifier(JavaScriptProceduralModifier):
 
     def modify(self, code_entity: CodeEntity) -> BugRewrite:
         """Change constants by small amounts."""
-        if not self.flip():
-            return None
 
         parser = Parser(JS_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
@@ -335,8 +327,6 @@ class OperationBreakChainsModifier(JavaScriptProceduralModifier):
 
     def modify(self, code_entity: CodeEntity) -> BugRewrite:
         """Break chained binary operations."""
-        if not self.flip():
-            return None
 
         parser = Parser(JS_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
@@ -438,8 +428,6 @@ class AugmentedAssignmentSwapModifier(JavaScriptProceduralModifier):
 
     def modify(self, code_entity: CodeEntity) -> BugRewrite:
         """Swap augmented assignment operators."""
-        if not self.flip():
-            return None
 
         parser = Parser(JS_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))

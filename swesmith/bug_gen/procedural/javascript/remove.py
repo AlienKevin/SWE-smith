@@ -20,9 +20,6 @@ class RemoveLoopModifier(JavaScriptProceduralModifier):
 
     def modify(self, code_entity: CodeEntity) -> BugRewrite:
         """Remove a loop from the code."""
-        if not self.flip():
-            return None
-
         # Parse the code
         parser = Parser(JS_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
@@ -82,9 +79,6 @@ class RemoveConditionalModifier(JavaScriptProceduralModifier):
 
     def modify(self, code_entity: CodeEntity) -> BugRewrite:
         """Remove an if statement from the code."""
-        if not self.flip():
-            return None
-
         # Parse the code
         parser = Parser(JS_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
@@ -138,9 +132,6 @@ class RemoveAssignmentModifier(JavaScriptProceduralModifier):
 
     def modify(self, code_entity: CodeEntity) -> BugRewrite:
         """Remove an assignment statement from the code."""
-        if not self.flip():
-            return None
-
         # Parse the code
         parser = Parser(JS_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
