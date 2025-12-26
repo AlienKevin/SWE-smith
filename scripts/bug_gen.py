@@ -420,7 +420,7 @@ def process_single_repo_validation(repo_name: str, repo_id: str, patches: list, 
         )
     
     val_results = [None] * len(patches)
-    max_workers = 50  # Limit concurrent sandboxes
+    max_workers = 100  # Limit concurrent sandboxes
     
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all tasks
