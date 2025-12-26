@@ -412,7 +412,7 @@ class Dayjsc8a26460(JavaScriptProfile):
         return default_npm_install_dockerfile(self.mirror_name)
 
     def log_parser(self, log: str) -> dict[str, str]:
-        return parse_log_jest(log)
+        return parse_log_mocha(log)
 
 
 @dataclass
@@ -853,7 +853,7 @@ RUN npm install
 CMD ["/bin/bash"]"""
 
     def log_parser(self, log: str) -> dict[str, str]:
-        return parse_log_mocha(log)  # Default fallback
+        return parse_log_qunit(log)
 
 
 @dataclass
@@ -1018,7 +1018,7 @@ RUN npx playwright install --with-deps chromium
 CMD ["/bin/bash"]"""
 
     def log_parser(self, log: str) -> dict[str, str]:
-        return parse_log_jest(log)
+        return parse_log_karma(log)
 
 
 @dataclass
@@ -1565,7 +1565,7 @@ RUN npm install
 CMD ["/bin/bash"]"""
 
     def log_parser(self, log: str) -> dict[str, str]:
-        return parse_log_jest(log)
+        return parse_log_mocha(log)
 
 
 @dataclass
@@ -1617,7 +1617,7 @@ RUN npm run build
 CMD ["/bin/bash"]"""
 
     def log_parser(self, log: str) -> dict[str, str]:
-        return parse_log_jest(log)
+        return parse_log_mocha(log)
 
 
 @dataclass
@@ -2033,7 +2033,7 @@ RUN sed -i "s/'-f'/'-a', '[\"--no-sandbox\"]', '-f'/" tests/test.js
 CMD ["/bin/bash"]"""
 
     def log_parser(self, log: str) -> dict[str, str]:
-        return parse_log_jest(log)
+        return parse_log_mocha(log)
 
 
 @dataclass
@@ -2108,7 +2108,7 @@ RUN npm install
 CMD ["/bin/bash"]"""
 
     def log_parser(self, log: str) -> dict[str, str]:
-        return parse_log_jest(log)
+        return parse_log_mocha(log)
 
 
 @dataclass
@@ -2311,7 +2311,7 @@ RUN npm install
 CMD ["/bin/bash"]"""
 
     def log_parser(self, log: str) -> dict[str, str]:
-        return parse_log_jest(log)
+        return parse_log_mocha(log)
 
 
 @dataclass
@@ -2459,7 +2459,7 @@ RUN npm install
 CMD ["/bin/bash"]"""
 
     def log_parser(self, log: str) -> dict[str, str]:
-        return parse_log_jest(log)
+        return parse_log_mocha(log)
 
 
 # Register all JavaScript profiles with the global registry
