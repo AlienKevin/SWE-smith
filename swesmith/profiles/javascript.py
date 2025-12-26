@@ -788,7 +788,7 @@ class Mathjs04e6e2d7(JavaScriptProfile):
     owner: str = "josdejong"
     repo: str = "mathjs"
     commit: str = "04e6e2d7a949d6ddc7d7139bf1e3a88e6fe5365b"
-    test_cmd: str = "npm run test:src -- --verbose"
+    test_cmd: str = "npm run test:src -- --reporter spec"
 
     @property
     def dockerfile(self):
