@@ -65,6 +65,14 @@ test = [
     "pytest",
     "pytest-cov",
 ]
+# Minimal dependencies for remote validation (no sglang, litellm, openai, docker, etc.)
+validate = [
+    "ghapi",
+    "python-dotenv",
+    "rich",
+    "unidiff",
+    "tqdm",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
