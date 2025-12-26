@@ -73,42 +73,6 @@ def resolve_profile(repo_name: str):
     return profile
 
 
-# We need to parse enough args to determine the repo profile BEFORE defining the Modal app
-# so we can set up the dynamic validator image.
-def get_initial_args():
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--repos", nargs="*", default=None)
-    parser.add_argument("--language", default=None)
-    try:
-        args, _ = parser.parse_known_args()
-        return args
-    except:
-        return argparse.Namespace(repos=None, language=None)
-
-
-try:
-    initial_args = get_initial_args()
-    repos_list = initial_args.repos
-    language = initial_args.language
-    
-    # If repos not specified but language is, get all repos for that language
-    if not repos_list and language:
-        repos_list = get_repos_for_language(language)
-    
-    # If repos is still None or empty, use placeholder
-    if not repos_list:
-        TARGET_IMAGE_NAME = "placeholder:latest"  # Won't be used, image already cached
-        profile = None
-    else:
-        # For validator image, we use the first repo's image
-        # In practice, each repo needs its own validator image, which we handle per-repo
-        first_repo = repos_list[0]
-        profile = resolve_profile(first_repo)
-        TARGET_IMAGE_NAME = profile.image_name
-except Exception as e:
-    # Don't fail on import - remote workers won't have args
-    TARGET_IMAGE_NAME = "placeholder:latest"
-    profile = None
 
 # Generator Image: For procedural generation
 # Use minimal 'generate' dependency group to avoid heavy packages like sglang, litellm, openai, etc.
@@ -121,17 +85,21 @@ generator_image = (
     .add_local_file(".env", remote_path="/root/.env")
 )
 
-# Validator Image: The actual repo image from Docker Hub
-# Modal requires Python, and module-level imports need swesmith
-# Use minimal 'validate' dependency group to avoid heavy packages like sglang
-# Note: This is a default image; actual validation uses repo-specific images
-print(f"TARGET_IMAGE_NAME: {TARGET_IMAGE_NAME}")
-validator_image = (
-    modal.Image.from_registry(TARGET_IMAGE_NAME, add_python="3.11")
-    .pip_install_from_pyproject("pyproject.toml", optional_dependencies=["validate"])
-    .env({"PYTHONPATH": "/root"})
-    .add_local_dir("swesmith", remote_path="/root/swesmith")
-)
+# Cache for dynamically created validator images
+_validator_image_cache: dict[str, modal.Image] = {}
+
+
+def get_validator_image(image_name: str) -> modal.Image:
+    """Get or create a validator image for the given Docker image name."""
+    if image_name not in _validator_image_cache:
+        _validator_image_cache[image_name] = (
+            modal.Image.from_registry(image_name, add_python="3.11")
+            .pip_install_from_pyproject("pyproject.toml", optional_dependencies=["validate"])
+            .env({"PYTHONPATH": "/root"})
+            .add_local_dir("swesmith", remote_path="/root/swesmith")
+        )
+    return _validator_image_cache[image_name]
+
 
 app = modal.App(APP_NAME)
 
@@ -242,11 +210,9 @@ TEST_OUTPUT_START = ">>>>> Start Test Output"
 TEST_OUTPUT_END = ">>>>> End Test Output"
 
 
-@app.function(
-    image=validator_image,
-    timeout=30 * MINUTES,
-)
-def run_validation_remote(
+def run_validation_in_sandbox(
+    app: modal.App,
+    image_name: str,
     instance_id: str,
     test_cmd: str,
     workdir: str,
@@ -254,46 +220,65 @@ def run_validation_remote(
     timeout: int = 300,
 ) -> dict:
     """
-    Runs tests inside the validator image (minimal deps, no swesmith).
-    If patch is None, runs pre-gold (baseline).
-    All parameters are passed explicitly to avoid swesmith dependency.
+    Run validation in a Modal Sandbox with a specific Docker image.
+    This allows running code in any container without pre-registering functions.
     """
-    import subprocess
-    import os
+    validator_image = get_validator_image(image_name)
     
-    # Ensure workdir exists
-    if not os.path.exists(workdir):
-        return {"error": f"Workdir {workdir} does not exist", "instance_id": instance_id}
-        
-    # Ensure clean state (case of worker reuse)
-    subprocess.run(["git", "checkout", "."], cwd=workdir, capture_output=True)
-
-    # Apply patch if provided
+    # Build the script to run inside the sandbox
+    script_lines = [
+        "#!/bin/bash",
+        "set -e",
+        f"cd {workdir}",
+        "git checkout .",  # Clean state
+    ]
+    
     if patch:
-        patch_path = f"/tmp/{instance_id}.diff"
-        with open(patch_path, "w") as f:
-            f.write(patch)
-        try:
-            subprocess.run(["git", "apply", patch_path], cwd=workdir, check=True, capture_output=True)
-        except subprocess.CalledProcessError as e:
-            return {"error": f"Failed to apply patch: {e.stderr.decode()}", "instance_id": instance_id}
-
-    # Run tests and capture markers
-    full_cmd = f"cd {workdir} && echo \"+ : '{TEST_OUTPUT_START}'\" && {test_cmd} ; echo \"+ : '{TEST_OUTPUT_END}'\""
+        # Write patch to file and apply it
+        script_lines.extend([
+            f"cat > /tmp/{instance_id}.diff << 'PATCH_EOF'",
+            patch,
+            "PATCH_EOF",
+            f"git apply /tmp/{instance_id}.diff",
+        ])
+    
+    # Run tests with markers
+    script_lines.extend([
+        f"echo \"+ : '{TEST_OUTPUT_START}'\"",
+        f"{test_cmd} || true",  # Don't fail on test failures
+        f"echo \"+ : '{TEST_OUTPUT_END}'\"",
+    ])
+    
+    script = "\n".join(script_lines)
     
     try:
-        result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, timeout=timeout)
-        output = result.stdout + result.stderr
-        exit_code = result.returncode
-    except subprocess.TimeoutExpired as e:
-        output = (e.stdout.decode() if e.stdout else "") + (e.stderr.decode() if e.stderr else "") + f"\n\nERROR: Tests timed out after {timeout} seconds"
-        exit_code = 124
-    
-    return {
-        "instance_id": instance_id,
-        "output": output,
-        "exit_code": exit_code
-    }
+        # Create and run sandbox
+        sb = modal.Sandbox.create(
+            app=app,
+            image=validator_image,
+            timeout=timeout,
+        )
+        
+        # Run the script
+        process = sb.exec("bash", "-c", script)
+        
+        # Wait for completion and get output
+        stdout = process.stdout.read()
+        stderr = process.stderr.read()
+        exit_code = process.wait()
+        
+        sb.terminate()
+        
+        return {
+            "instance_id": instance_id,
+            "output": stdout + stderr,
+            "exit_code": exit_code,
+        }
+    except Exception as e:
+        return {
+            "instance_id": instance_id,
+            "error": str(e),
+        }
 
 
 def spawn_generation_task(repo_name: str, max_bugs: int, interleave: bool):
@@ -370,7 +355,7 @@ def process_generation_result(repo_name: str, repo_id: str, results: dict) -> di
     }
 
 
-def process_single_repo_validation(repo_name: str, repo_id: str, patches: list, profile) -> dict:
+def process_single_repo_validation(repo_name: str, repo_id: str, patches: list, profile, modal_app: modal.App) -> dict:
     """
     Process validation for a single repo (within app.run() context).
     Returns validation results dict.
@@ -385,12 +370,15 @@ def process_single_repo_validation(repo_name: str, repo_id: str, patches: list, 
     
     print(f"Test command: {test_cmd}")
     print(f"Workdir: {workdir}")
+    print(f"Using image: {profile.image_name}")
     
     # 1. Run Baseline (Pre-gold)
     baseline_id = f"{repo_id}.ref"
     print(f"Running baseline (pre-gold) test suite for {baseline_id}...")
     
-    baseline = run_validation_remote.remote(
+    baseline = run_validation_in_sandbox(
+        app=modal_app,
+        image_name=profile.image_name,
         instance_id=baseline_id,
         test_cmd=test_cmd,
         workdir=workdir,
@@ -414,13 +402,44 @@ def process_single_repo_validation(repo_name: str, repo_id: str, patches: list, 
         f.write(baseline["output"])
     
     # 2. Run post-gold for all patches in parallel
+    # Using ThreadPoolExecutor to run multiple Sandboxes concurrently
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
     print(f"Running post-gold tests in parallel for {len(patches)} patches...")
     
-    val_args = [
-        (p["instance_id"], test_cmd, workdir, p["patch"], profile.timeout)
-        for p in patches
-    ]
-    val_results = list(run_validation_remote.starmap(val_args))
+    def run_patch_validation(patch_info):
+        idx, p = patch_info
+        return run_validation_in_sandbox(
+            app=modal_app,
+            image_name=profile.image_name,
+            instance_id=p["instance_id"],
+            test_cmd=test_cmd,
+            workdir=workdir,
+            patch=p["patch"],
+            timeout=profile.timeout
+        )
+    
+    val_results = [None] * len(patches)
+    max_workers = 50  # Limit concurrent sandboxes
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all tasks
+        future_to_idx = {
+            executor.submit(run_patch_validation, (i, p)): i 
+            for i, p in enumerate(patches)
+        }
+        
+        # Collect results as they complete
+        completed = 0
+        for future in as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            try:
+                val_results[idx] = future.result()
+            except Exception as e:
+                val_results[idx] = {"instance_id": patches[idx]["instance_id"], "error": str(e)}
+            completed += 1
+            if completed % 10 == 0 or completed == len(patches):
+                print(f"  Progress: {completed}/{len(patches)} patches validated")
     
     # 3. Grade locally
     from swesmith.harness.grading import get_valid_report
@@ -560,7 +579,8 @@ if __name__ == "__main__":
                         gen_result["repo"],
                         gen_result["repo_id"],
                         patches,
-                        profile
+                        profile,
+                        modal_app=app
                     )
                     all_results.append(val_result)
                 except Exception as e:
@@ -599,7 +619,8 @@ if __name__ == "__main__":
                         continue
                     
                     val_result = process_single_repo_validation(
-                        repo, repo_id, patches, profile
+                        repo, repo_id, patches, profile,
+                        modal_app=app
                     )
                     all_results.append(val_result)
                 except Exception as e:
