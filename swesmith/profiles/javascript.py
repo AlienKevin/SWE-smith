@@ -89,14 +89,15 @@ def parse_log_jest(log: str) -> dict[str, str]:
 def parse_log_mocha(log: str) -> dict[str, str]:
     test_status_map = {}
     # Pattern for checkmark/x/dash style output
-    pattern = r"^\s*(✔|✖|-)\s(.+?)(?:\s\((\d+\s*m?s)\))?$"
+    # Note: Match both ✓ (U+2713) and ✔ (U+2714) checkmarks as different Mocha versions use different symbols
+    pattern = r"^\s*([✓✔]|✖|-)\s(.+?)(?:\s\((\d+\s*m?s)\))?$"
     # Pattern for numbered failures like "1) test name" or "1) should solve..."
     fail_pattern = r"^\s*\d+\)\s+(.+?)(?:\s\((\d+\s*m?s)\))?$"
     for line in log.split("\n"):
         match = re.match(pattern, line.strip())
         if match:
             status_symbol, test_name, _duration = match.groups()
-            if status_symbol == "✔":
+            if status_symbol in ("✓", "✔"):
                 test_status_map[test_name] = TestStatus.PASSED.value
             elif status_symbol == "✖":
                 test_status_map[test_name] = TestStatus.FAILED.value
