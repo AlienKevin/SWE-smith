@@ -20,7 +20,12 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
-dependencies = [
+# Base dependencies are empty to allow granular dependency groups for Modal images
+dependencies = []
+
+[project.optional-dependencies]
+# Full dependencies for local development
+all = [
     "astor",
     "datasets",
     "docker",
@@ -51,8 +56,6 @@ dependencies = [
     "textual",
     "tree-sitter-php>=0.23.11",
 ]
-
-[project.optional-dependencies]
 docs = [
     "mkdocs",
     "mkdocs-material",
