@@ -525,3 +525,99 @@ class AugmentedAssignmentSwapModifier(JavaScriptProceduralModifier):
             )
 
         return modified_source.decode("utf-8")
+
+
+class TernaryOperatorSwapModifier(JavaScriptProceduralModifier):
+    """Modify ternary operators (condition ? consequent : alternative)"""
+
+    explanation: str = "The ternary operator branches may be swapped or the condition may be incorrect."
+    name: str = "func_pm_ternary_swap"
+    conditions: list = [CodeProperty.IS_FUNCTION, CodeProperty.HAS_TERNARY]
+
+    def modify(self, code_entity: CodeEntity) -> BugRewrite:
+        """Modify ternary operators by swapping branches or negating conditions."""
+        parser = Parser(JS_LANGUAGE)
+        tree = parser.parse(bytes(code_entity.src_code, "utf8"))
+
+        modified_code = self._modify_ternary(code_entity.src_code, tree.root_node)
+
+        if modified_code == code_entity.src_code:
+            return None
+
+        return BugRewrite(
+            rewrite=modified_code,
+            explanation=self.explanation,
+            strategy=self.name,
+        )
+
+    def _modify_ternary(self, source_code: str, node) -> str:
+        """Find and modify ternary (conditional) expressions."""
+        changes = []
+        source_bytes = source_code.encode("utf-8")
+
+        def collect_ternary_ops(n):
+            # In tree-sitter-javascript, ternary is "ternary_expression"
+            if n.type == "ternary_expression" and len(n.children) >= 5:
+                # Structure: condition ? consequent : alternative
+                # Children: [condition, "?", consequent, ":", alternative]
+                condition = None
+                consequent = None
+                alternative = None
+                
+                # Parse children - skip operators
+                content_children = [c for c in n.children if c.type not in ["?", ":"]]
+                if len(content_children) >= 3:
+                    condition = content_children[0]
+                    consequent = content_children[1]
+                    alternative = content_children[2]
+                    
+                    if condition and consequent and alternative and self.flip():
+                        # Choose modification type randomly
+                        mod_type = self.rand.choice(["swap_branches", "negate_condition"])
+                        changes.append({
+                            "node": n,
+                            "condition": condition,
+                            "consequent": consequent,
+                            "alternative": alternative,
+                            "mod_type": mod_type,
+                        })
+
+            for child in n.children:
+                collect_ternary_ops(child)
+
+        collect_ternary_ops(node)
+
+        if not changes:
+            return source_code
+
+        # Work with bytes for modifications
+        modified_source = source_bytes
+        for change in reversed(changes):
+            node = change["node"]
+            condition = change["condition"]
+            consequent = change["consequent"]
+            alternative = change["alternative"]
+            mod_type = change["mod_type"]
+
+            condition_text = source_bytes[condition.start_byte : condition.end_byte].decode("utf-8")
+            consequent_text = source_bytes[consequent.start_byte : consequent.end_byte].decode("utf-8")
+            alternative_text = source_bytes[alternative.start_byte : alternative.end_byte].decode("utf-8")
+
+            if mod_type == "swap_branches":
+                # Swap consequent and alternative: a ? b : c -> a ? c : b
+                new_ternary = f"{condition_text} ? {alternative_text} : {consequent_text}"
+            else:  # negate_condition
+                # Negate condition: a ? b : c -> !a ? b : c  (but keep branches, so effectively swaps logic)
+                # Actually, negating and keeping same branches is same as swapping, so:
+                # a ? b : c -> !(a) ? b : c  which equals a ? c : b
+                # Let's do: negate condition AND swap branches for different bug pattern
+                new_ternary = f"!({condition_text}) ? {consequent_text} : {alternative_text}"
+
+            modified_source = (
+                modified_source[: node.start_byte]
+                + new_ternary.encode("utf-8")
+                + modified_source[node.end_byte :]
+            )
+
+        return modified_source.decode("utf-8")
+

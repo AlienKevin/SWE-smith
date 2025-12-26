@@ -5,7 +5,7 @@ JavaScript remove modifiers for procedural bug generation using tree-sitter.
 import tree_sitter_javascript as tsjs
 from swesmith.bug_gen.procedural.base import CommonPMs
 from swesmith.bug_gen.procedural.javascript.base import JavaScriptProceduralModifier
-from swesmith.constants import BugRewrite, CodeEntity
+from swesmith.constants import BugRewrite, CodeEntity, CodeProperty
 from tree_sitter import Language, Parser
 
 JS_LANGUAGE = Language(tsjs.language())
@@ -193,3 +193,72 @@ class RemoveAssignmentModifier(JavaScriptProceduralModifier):
             modified_source = modified_source[:start_byte] + modified_source[end_byte:]
 
         return modified_source
+
+
+class RemoveTernaryModifier(JavaScriptProceduralModifier):
+    """Remove ternary expressions by replacing with just one branch."""
+
+    explanation: str = "A ternary conditional expression may be missing - only one branch is being used."
+    name: str = "func_pm_remove_ternary"
+    conditions: list = [CodeProperty.IS_FUNCTION, CodeProperty.HAS_TERNARY]
+
+    def modify(self, code_entity: CodeEntity) -> BugRewrite:
+        """Remove ternary expressions by replacing with one of the branches."""
+        parser = Parser(JS_LANGUAGE)
+        tree = parser.parse(bytes(code_entity.src_code, "utf8"))
+
+        modified_code = self._remove_ternary(code_entity.src_code, tree.root_node)
+
+        if modified_code == code_entity.src_code:
+            return None
+
+        return BugRewrite(
+            rewrite=modified_code,
+            explanation=self.explanation,
+            strategy=self.name,
+        )
+
+    def _remove_ternary(self, source_code: str, node) -> str:
+        """Find and remove ternary expressions by replacing with one branch."""
+        changes = []
+        source_bytes = source_code.encode("utf-8")
+
+        def collect_ternary_ops(n):
+            if n.type == "ternary_expression" and len(n.children) >= 5:
+                # Structure: condition ? consequent : alternative
+                content_children = [c for c in n.children if c.type not in ["?", ":"]]
+                if len(content_children) >= 3:
+                    consequent = content_children[1]
+                    alternative = content_children[2]
+                    
+                    if self.flip():
+                        # Randomly choose which branch to keep
+                        keep_consequent = self.rand.choice([True, False])
+                        changes.append({
+                            "node": n,
+                            "replacement": consequent if keep_consequent else alternative,
+                        })
+
+            for child in n.children:
+                collect_ternary_ops(child)
+
+        collect_ternary_ops(node)
+
+        if not changes:
+            return source_code
+
+        # Work with bytes for modifications
+        modified_source = source_bytes
+        for change in reversed(changes):
+            node = change["node"]
+            replacement = change["replacement"]
+
+            replacement_text = source_bytes[replacement.start_byte : replacement.end_byte].decode("utf-8")
+
+            modified_source = (
+                modified_source[: node.start_byte]
+                + replacement_text.encode("utf-8")
+                + modified_source[node.end_byte :]
+            )
+
+        return modified_source.decode("utf-8")

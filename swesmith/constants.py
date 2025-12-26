@@ -73,6 +73,7 @@ class CodeProperty(Enum):
     # Operations by type
     HAS_BINARY_OP = "has_binary_op"
     HAS_BOOL_OP = "has_bool_op"
+    HAS_TERNARY = "has_ternary"
     HAS_UNARY_OP = "has_unary_op"
 
 

@@ -80,6 +80,8 @@ class JavaScriptEntity(CodeEntity):
             self._tags.add(CodeProperty.HAS_PARENT)
         if n.type in ["unary_expression", "update_expression"]:
             self._tags.add(CodeProperty.HAS_UNARY_OP)
+        if n.type == "ternary_expression":
+            self._tags.add(CodeProperty.HAS_TERNARY)
 
     def _check_binary_expressions(self, n):
         """Check binary expression patterns."""
