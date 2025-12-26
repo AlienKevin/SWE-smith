@@ -19,16 +19,16 @@ from swesmith.bug_gen.procedural.javascript.remove import (
 
 MODIFIERS_JAVASCRIPT: list[ProceduralModifier] = [
     # Operation modifiers (5)
-    OperationChangeModifier(likelihood=0.2),
-    OperationFlipOperatorModifier(likelihood=0.2),
-    OperationSwapOperandsModifier(likelihood=0.2),
-    OperationChangeConstantsModifier(likelihood=0.2),
-    OperationBreakChainsModifier(likelihood=0.2),
+    OperationChangeModifier(likelihood=0.5),
+    OperationFlipOperatorModifier(likelihood=0.5),
+    OperationSwapOperandsModifier(likelihood=0.5),
+    OperationChangeConstantsModifier(likelihood=0.5),
+    OperationBreakChainsModifier(likelihood=0.5),
     # Control flow modifiers (2)
-    ControlIfElseInvertModifier(likelihood=0.2),
-    ControlShuffleLinesModifier(likelihood=0.2),
+    ControlIfElseInvertModifier(likelihood=0.5),
+    ControlShuffleLinesModifier(likelihood=0.5),
     # Remove modifiers (3)
-    RemoveLoopModifier(likelihood=0.2),
-    RemoveConditionalModifier(likelihood=0.2),
-    RemoveAssignmentModifier(likelihood=0.2),
+    RemoveLoopModifier(likelihood=0.5),
+    RemoveConditionalModifier(likelihood=0.5),
+    RemoveAssignmentModifier(likelihood=0.5),
 ]
