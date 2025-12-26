@@ -61,10 +61,11 @@ except Exception as e:
     raise RuntimeError(f"Failed to find profile for repo: {e}")
 
 # Generator Image: For procedural generation
+# Use minimal 'generate' dependency group to avoid heavy packages like sglang, litellm, openai, etc.
 generator_image = (
     modal.Image.from_registry("ubuntu:22.04", add_python="3.11")
     .apt_install("git")
-    .pip_install_from_pyproject("pyproject.toml")
+    .pip_install_from_pyproject("pyproject.toml", optional_dependencies=["generate"])
     .env({"PYTHONPATH": "/root"})
     .add_local_dir("swesmith", remote_path="/root/swesmith")
     .add_local_file(".env", remote_path="/root/.env")

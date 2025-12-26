@@ -73,6 +73,28 @@ validate = [
     "unidiff",
     "tqdm",
 ]
+# Minimal dependencies for remote procedural bug generation (no sglang, litellm, openai, datasets, etc.)
+generate = [
+    "astor",
+    "docker",
+    "ghapi",
+    "libcst",
+    "python-dotenv",
+    "rich",
+    "swebench",
+    "tqdm",
+    "tree-sitter>=0.25",
+    "tree-sitter-c",
+    "tree-sitter-cpp",
+    "tree-sitter-c-sharp",
+    "tree-sitter-go",
+    "tree-sitter-javascript",
+    "tree-sitter-java",
+    "tree-sitter-ruby",
+    "tree-sitter-rust",
+    "tree-sitter-php>=0.23.11",
+    "unidiff",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
