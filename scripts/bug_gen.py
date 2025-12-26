@@ -12,53 +12,103 @@ modal.enable_output()  # Enable detailed build logs
 APP_NAME = "swesmith-bug-gen"
 MINUTES = 60
 
+# Mapping from language name to profile base class name
+LANGUAGE_TO_BASE_CLASS = {
+    "python": "PythonProfile",
+    "javascript": "JavaScriptProfile",
+    "typescript": "JavaScriptProfile",  # TypeScript uses JavaScriptProfile
+    "golang": "GoProfile",
+    "go": "GoProfile",
+    "rust": "RustProfile",
+    "java": "JavaProfile",
+    "c": "CProfile",
+    "cpp": "CppProfile",
+    "csharp": "CSharpProfile",
+    "php": "PhpProfile",
+}
+
+
+def get_repos_for_language(language: str) -> list[str]:
+    """Get all registered repos for a given language."""
+    from swesmith.profiles import registry
+    
+    base_class_name = LANGUAGE_TO_BASE_CLASS.get(language.lower())
+    if not base_class_name:
+        raise ValueError(f"Unknown language: {language}. Supported: {list(LANGUAGE_TO_BASE_CLASS.keys())}")
+    
+    repos = []
+    # Get unique profile classes (values() returns unique profiles)
+    for profile in registry.values():
+        # Check if the profile class is a subclass of the language-specific base class
+        if profile.__class__.__name__ != base_class_name and base_class_name in [
+            base.__name__ for base in profile.__class__.__mro__
+        ]:
+            repos.append(f"{profile.owner}/{profile.repo}")
+    return repos
+
+
+def resolve_profile(repo_name: str):
+    """Resolve a profile from repo name using robust lookup."""
+    from swesmith.profiles import registry
+    
+    profile = None
+    
+    # Try direct lookup first
+    try:
+        profile = registry.get(repo_name)
+    except KeyError:
+        # Try owner/repo match
+        for key in registry.keys():
+            try:
+                p = registry.get(key)
+                if f"{p.owner}/{p.repo}" == repo_name:
+                    profile = p
+                    break
+            except Exception:
+                continue
+    
+    if not profile:
+        raise RuntimeError(f"No profile found for repo: {repo_name}")
+    
+    return profile
+
+
 # We need to parse enough args to determine the repo profile BEFORE defining the Modal app
 # so we can set up the dynamic validator image.
 def get_initial_args():
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--repo", required=False)
+    parser.add_argument("--repos", nargs="*", default=None)
+    parser.add_argument("--language", default=None)
     try:
         args, _ = parser.parse_known_args()
         return args
     except:
-        return argparse.Namespace(repo=None)
+        return argparse.Namespace(repos=None, language=None)
 
-# ... (the rest of the top-level stays similar but I'll update the generator_image too)
 
 try:
     initial_args = get_initial_args()
-    repo_name = initial_args.repo
+    repos_list = initial_args.repos
+    language = initial_args.language
     
-    # If repo is None (remote import), use placeholder - the image is already built
-    if repo_name is None:
+    # If repos not specified but language is, get all repos for that language
+    if not repos_list and language:
+        repos_list = get_repos_for_language(language)
+    
+    # If repos is still None or empty, use placeholder
+    if not repos_list:
         TARGET_IMAGE_NAME = "placeholder:latest"  # Won't be used, image already cached
         profile = None
     else:
-        from swesmith.profiles import registry
-        
-        # Robust profile lookup (same logic as ensure_mirror)
-        profile = None
-        
-        # Try direct lookup first
-        try:
-            profile = registry.get(repo_name)
-        except KeyError:
-            # Try owner/repo match
-            for key in registry.keys():
-                try:
-                    p = registry.get(key)
-                    if f"{p.owner}/{p.repo}" == repo_name:
-                        profile = p
-                        break
-                except Exception:
-                    continue
-        
-        if not profile:
-            raise RuntimeError(f"No profile found for repo: {repo_name}")
-        
+        # For validator image, we use the first repo's image
+        # In practice, each repo needs its own validator image, which we handle per-repo
+        first_repo = repos_list[0]
+        profile = resolve_profile(first_repo)
         TARGET_IMAGE_NAME = profile.image_name
 except Exception as e:
-    raise RuntimeError(f"Failed to find profile for repo: {e}")
+    # Don't fail on import - remote workers won't have args
+    TARGET_IMAGE_NAME = "placeholder:latest"
+    profile = None
 
 # Generator Image: For procedural generation
 # Use minimal 'generate' dependency group to avoid heavy packages like sglang, litellm, openai, etc.
@@ -74,6 +124,7 @@ generator_image = (
 # Validator Image: The actual repo image from Docker Hub
 # Modal requires Python, and module-level imports need swesmith
 # Use minimal 'validate' dependency group to avoid heavy packages like sglang
+# Note: This is a default image; actual validation uses repo-specific images
 print(f"TARGET_IMAGE_NAME: {TARGET_IMAGE_NAME}")
 validator_image = (
     modal.Image.from_registry(TARGET_IMAGE_NAME, add_python="3.11")
@@ -88,7 +139,7 @@ app = modal.App(APP_NAME)
 @app.function(
     image=generator_image,
     secrets=[modal.Secret.from_name("GITHUB_TOKEN")],
-    timeout=60 * MINUTES,
+    timeout=5 * MINUTES,
 )
 def generate_bugs_remote(repo_name: str, max_bugs: int, interleave: bool) -> dict:
     """
@@ -245,185 +296,341 @@ def run_validation_remote(
     }
 
 
+def spawn_generation_task(repo_name: str, max_bugs: int, interleave: bool):
+    """
+    Spawn a generation task without blocking (returns a FunctionCall handle).
+    Returns (repo_name, repo_id, handle) or (repo_name, None, error_dict) on failure.
+    """
+    try:
+        profile = resolve_profile(repo_name)
+        repo_id = profile.repo_name
+        print(f"Spawning generation for {repo_name} (profile: {profile.__class__.__name__})...")
+        
+        # spawn() returns immediately with a FunctionCall handle
+        handle = generate_bugs_remote.spawn(
+            repo_name=repo_name,
+            max_bugs=max_bugs,
+            interleave=interleave
+        )
+        return (repo_name, repo_id, handle)
+    except Exception as e:
+        return (repo_name, None, {"repo": repo_name, "error": f"Failed to resolve profile: {e}"})
+
+
+def process_generation_result(repo_name: str, repo_id: str, results: dict) -> dict:
+    """
+    Process the results from a completed generation task.
+    """
+    if "error" in results:
+        print(f"Error during bug generation for {repo_name}:")
+        print(results["error"])
+        if "traceback" in results:
+            print(results["traceback"])
+        return {"repo": repo_name, "repo_id": repo_id, "error": results["error"]}
+    
+    # Parse result patches
+    if "patches_json" not in results:
+        print(f"Warning: No patches_json returned for {repo_name}")
+        if "bug_gen_zip" in results:
+            print("Saving bug_gen_zip for manual inspection...")
+            local_bug_dir = Path(f"logs/bug_gen/{repo_id}")
+            local_bug_dir.mkdir(parents=True, exist_ok=True)
+            zip_path = local_bug_dir / "bugs.zip"
+            with open(zip_path, "wb") as f:
+                f.write(results["bug_gen_zip"])
+            subprocess.run(["unzip", "-o", str(zip_path), "-d", str(local_bug_dir)], check=True)
+            print(f"Bugs extracted to {local_bug_dir}")
+        return {"repo": repo_name, "repo_id": repo_id, "error": "No patches_json returned"}
+    
+    patches = json.loads(results["patches_json"])
+    if not patches:
+        print(f"No bugs were generated for {repo_name}.")
+        return {"repo": repo_name, "repo_id": repo_id, "patches": [], "total_bugs": 0}
+    
+    # Save artifacts locally
+    local_bug_dir = Path(f"logs/bug_gen/{repo_id}")
+    local_bug_dir.mkdir(parents=True, exist_ok=True)
+    
+    with open(local_bug_dir.parent / f"{repo_id}_all_patches.json", "w") as f:
+        f.write(results["patches_json"])
+    
+    if "bug_gen_zip" in results:
+        zip_path = local_bug_dir / "bugs.zip"
+        with open(zip_path, "wb") as f:
+            f.write(results["bug_gen_zip"])
+        subprocess.run(["unzip", "-o", str(zip_path), "-d", str(local_bug_dir)], check=True)
+        os.remove(zip_path)
+    
+    print(f"Generated {len(patches)} bugs for {repo_name}")
+    return {
+        "repo": repo_name,
+        "repo_id": repo_id,
+        "patches": patches,
+        "total_bugs": len(patches)
+    }
+
+
+def process_single_repo_validation(repo_name: str, repo_id: str, patches: list, profile) -> dict:
+    """
+    Process validation for a single repo (within app.run() context).
+    Returns validation results dict.
+    """
+    print(f"\n{'='*60}")
+    print(f"Validating {len(patches)} bugs for: {repo_name}")
+    print(f"{'='*60}")
+    
+    from swesmith.constants import ENV_NAME
+    test_cmd = profile.test_cmd
+    workdir = f"/{ENV_NAME}"
+    
+    print(f"Test command: {test_cmd}")
+    print(f"Workdir: {workdir}")
+    
+    # 1. Run Baseline (Pre-gold)
+    baseline_id = f"{repo_id}.ref"
+    print(f"Running baseline (pre-gold) test suite for {baseline_id}...")
+    
+    baseline = run_validation_remote.remote(
+        instance_id=baseline_id,
+        test_cmd=test_cmd,
+        workdir=workdir,
+        patch=None,
+        timeout=profile.timeout_ref
+    )
+    
+    if "error" in baseline:
+        print(f"Baseline failed for {repo_name}: {baseline['error']}")
+        return {"repo": repo_name, "error": f"Baseline failed: {baseline['error']}"}
+    
+    # Save baseline results
+    valid_results_dir = Path(f"logs/run_validation/{repo_id}")
+    valid_results_dir.mkdir(parents=True, exist_ok=True)
+    
+    baseline_dir = valid_results_dir / baseline_id
+    baseline_dir.mkdir(parents=True, exist_ok=True)
+    
+    baseline_log_path = baseline_dir / "test_output.txt"
+    with open(baseline_log_path, "w") as f:
+        f.write(baseline["output"])
+    
+    # 2. Run post-gold for all patches in parallel
+    print(f"Running post-gold tests in parallel for {len(patches)} patches...")
+    
+    val_args = [
+        (p["instance_id"], test_cmd, workdir, p["patch"], profile.timeout)
+        for p in patches
+    ]
+    val_results = list(run_validation_remote.starmap(val_args))
+    
+    # 3. Grade locally
+    from swesmith.harness.grading import get_valid_report
+    reports = []
+    valid_bugs_count = 0
+    
+    for i, res in enumerate(val_results):
+        if "error" in res:
+            inst_id = patches[i].get("instance_id", f"patch_{i}")
+            print(f"Validation error for {inst_id}: {res['error']}")
+            continue
+        
+        inst_id = res["instance_id"]
+        inst_log_dir = valid_results_dir / inst_id
+        inst_log_dir.mkdir(parents=True, exist_ok=True)
+        
+        log_path = inst_log_dir / "test_output.txt"
+        with open(log_path, "w") as f:
+            f.write(res["output"])
+        
+        try:
+            report = get_valid_report(
+                val_pregold_path=str(baseline_log_path),
+                val_postgold_path=str(log_path),
+                instance=patches[i]
+            )
+            
+            with open(inst_log_dir / "report.json", "w") as f:
+                json.dump(report, f, indent=4)
+            
+            reports.append({
+                "instance_id": inst_id,
+                "report": report
+            })
+            
+            if len(report.get("PASS_TO_FAIL", [])) > 0:
+                valid_bugs_count += 1
+        except Exception as e:
+            print(f"Error grading {inst_id}: {e}")
+    
+    # Save validation summary
+    with open(valid_results_dir / "validation_summary.json", "w") as f:
+        json.dump(reports, f, indent=2)
+    
+    print(f"Validation complete for {repo_name}: {valid_bugs_count}/{len(patches)} valid bugs")
+    return {
+        "repo": repo_name,
+        "total_bugs": len(patches),
+        "valid_bugs": valid_bugs_count,
+        "logs_dir": str(valid_results_dir)
+    }
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Modal Bug Generation & Validation")
-    parser.add_argument("--repo", required=True, help="Repository name (owner/repo)")
-    parser.add_argument("--language", required=True, help="Language (e.g. javascript)")
-    parser.add_argument("--max-bugs", type=int, default=200, help="Max bugs per modifier")
+    parser.add_argument("--repos", nargs="*", default=None, help="Repository names (owner/repo). If not specified, runs on all repos for the language.")
+    parser.add_argument("--language", required=True, help="Language (e.g. javascript, python, golang)")
+    parser.add_argument("--max-bugs", type=int, default=100, help="Max bugs per modifier")
     parser.add_argument("--interleave", action="store_true", help="Interleave modifiers")
     parser.add_argument("--validate-only", action="store_true", help="Skip generation and only run validation using local logs")
     
     args = parser.parse_args()
     
-    # Use the profile already resolved at module level (assumes mirror exists)
-    print(f"Using profile: {profile.__class__.__name__}")
-    repo_id = profile.repo_name  # Standard repo_id from profile
+    # Determine which repos to process
+    if args.repos:
+        repos_to_process = args.repos
+    else:
+        repos_to_process = get_repos_for_language(args.language)
+        print(f"Found {len(repos_to_process)} repos for language '{args.language}':")
+        for repo in repos_to_process:
+            print(f"  - {repo}")
     
-    results = None
-    patches = None
+    if not repos_to_process:
+        print(f"No repos found for language: {args.language}")
+        exit(1)
     
+    all_results = []
+    
+    # Single app.run() context for all repos - Modal handles parallelism on remote workers
     with app.run():
         if not args.validate_only:
-            print(f"Submitting bug generation task for {args.repo}...")
-            results = generate_bugs_remote.remote(
-                repo_name=args.repo,
-                max_bugs=args.max_bugs,
-                interleave=args.interleave
-            )
-        
-            if "error" in results:
-                print("Error during bug generation:")
-                print(results["error"])
-                if "traceback" in results:
-                    print(results["traceback"])
-                exit(1)
-                
-            # Parse result patches
-            if "patches_json" not in results:
-                print("Warning: No patches_json returned from remote task.")
-                # Check if we got a zip but no json (unlikely but possible if collection failed)
-                if "bug_gen_zip" in results:
-                    print("However, a bug_gen_zip was returned. Unpacking for manual inspection...")
-                    local_bug_dir = Path(f"logs/bug_gen/{repo_id}")
-                    local_bug_dir.mkdir(parents=True, exist_ok=True)
-                    zip_path = local_bug_dir / "bugs.zip"
-                    with open(zip_path, "wb") as f:
-                        f.write(results["bug_gen_zip"])
-                    subprocess.run(["unzip", "-o", str(zip_path), "-d", str(local_bug_dir)], check=True)
-                    print(f"Bugs extracted to {local_bug_dir}")
-                exit(1)
-
-            patches = json.loads(results["patches_json"])
-            if not patches:
-                print("No bugs were generated.")
-                exit(0)
-                
-            # Save artifacts Locally
-            local_bug_dir = Path(f"logs/bug_gen/{repo_id}")
-            local_bug_dir.mkdir(parents=True, exist_ok=True)
+            # Phase 1: Generate bugs for all repos IN PARALLEL
+            print(f"\n{'#'*60}")
+            print(f"# PHASE 1: BUG GENERATION ({len(repos_to_process)} repos) - PARALLEL")
+            print(f"{'#'*60}")
             
-            with open(local_bug_dir.parent / f"{repo_id}_all_patches.json", "w") as f:
-                f.write(results["patches_json"])
-                
-            if "bug_gen_zip" in results:
-                zip_path = local_bug_dir / "bugs.zip"
-                with open(zip_path, "wb") as f:
-                    f.write(results["bug_gen_zip"])
-                subprocess.run(["unzip", "-o", str(zip_path), "-d", str(local_bug_dir)], check=True)
-                os.remove(zip_path)
-        else:
-            # Validate-only mode: load patches from local file
-            print(f"Validation-only mode. Loading patches from logs/bug_gen/{repo_id}_all_patches.json...")
-            patches_file = Path(f"logs/bug_gen/{repo_id}_all_patches.json")
-            if not patches_file.exists():
-                print(f"Error: Patches file {patches_file} not found. Cannot run validation-only.")
-                exit(1)
-            with open(patches_file, "r") as f:
-                patches = json.load(f)
+            # Spawn all generation tasks at once (non-blocking)
+            spawn_results = []
+            for repo in repos_to_process:
+                spawn_results.append(
+                    spawn_generation_task(repo, args.max_bugs, args.interleave)
+                )
             
-            local_bug_dir = Path(f"logs/bug_gen/{repo_id}")
-            if not local_bug_dir.exists():
-                print(f"Warning: Local bug directory {local_bug_dir} missing. Baseline might still work but post-gold logs won't be saved correctly if folder creation fails.")
-
-        # Always run Validation (unless explicitly skipped via code flow)
-        if patches:
-            print(f"\nStarting remote validation for {len(patches)} bugs...")
+            print(f"\nSpawned {len(spawn_results)} generation tasks. Waiting for results...")
             
-            # Get test command and workdir from local profile
-            from swesmith.constants import ENV_NAME
-            test_cmd = profile.test_cmd  # Use base test command directly
-            workdir = f"/{ENV_NAME}"
+            # Wait for all results and process them
+            generation_results = []
+            for repo_name, repo_id, handle_or_error in spawn_results:
+                if isinstance(handle_or_error, dict):
+                    # This was an error during spawn
+                    generation_results.append(handle_or_error)
+                else:
+                    # This is a FunctionCall handle - wait for result
+                    try:
+                        results = handle_or_error.get()  # Blocks until this task completes
+                        gen_result = process_generation_result(repo_name, repo_id, results)
+                        generation_results.append(gen_result)
+                    except Exception as e:
+                        generation_results.append({
+                            "repo": repo_name,
+                            "repo_id": repo_id,
+                            "error": f"Generation failed: {e}"
+                        })
             
-            print(f"Test command: {test_cmd}")
-            print(f"Workdir: {workdir}")
+            # Phase 2: Validate bugs for each repo that succeeded
+            print(f"\n{'#'*60}")
+            print(f"# PHASE 2: VALIDATION")
+            print(f"{'#'*60}")
             
-            # 1. Run Baseline (Pre-gold)
-            # swesmith conventions use f"{repo}.ref" for baseline data
-            baseline_id = f"{repo_id}.ref"
-            print(f"Running baseline (pre-gold) test suite for {baseline_id}...")
-            
-            baseline = run_validation_remote.remote(
-                instance_id=baseline_id,
-                test_cmd=test_cmd,
-                workdir=workdir,
-                patch=None,
-                timeout=profile.timeout_ref
-            )
-            
-            if "error" in baseline:
-                print(f"Baseline failed: {baseline['error']}")
-                exit(1)
-            
-            # Match swesmith folder structure
-            valid_results_dir = Path(f"logs/run_validation/{repo_id}")
-            valid_results_dir.mkdir(parents=True, exist_ok=True)
-            
-            baseline_dir = valid_results_dir / baseline_id
-            baseline_dir.mkdir(parents=True, exist_ok=True)
-            
-            baseline_log_path = baseline_dir / "test_output.txt"
-            with open(baseline_log_path, "w") as f:
-                f.write(baseline["output"])
-            
-            # 2. Run post-gold for all patches in parallel
-            print("Running post-gold tests in parallel...")
-            
-            # Build args for starmap - each tuple is (instance_id, test_cmd, workdir, patch, timeout)
-            val_args = [
-                (p["instance_id"], test_cmd, workdir, p["patch"], profile.timeout)
-                for p in patches
-            ]
-            val_results = list(run_validation_remote.starmap(val_args))
-            
-            # 3. Grade locally using swe-smith grading logic
-            from swesmith.harness.grading import get_valid_report
-            reports = []
-            valid_bugs_count = 0
-            
-            for i, res in enumerate(val_results):
-                # Check for validation errors (e.g., patch application failure)
-                if "error" in res:
-                    inst_id = patches[i].get("instance_id", f"patch_{i}")
-                    print(f"Validation error for {inst_id}: {res['error']}")
+            for gen_result in generation_results:
+                if "error" in gen_result:
+                    all_results.append(gen_result)
                     continue
                 
-                inst_id = res["instance_id"]
-                inst_log_dir = valid_results_dir / inst_id
-                inst_log_dir.mkdir(parents=True, exist_ok=True)
-                
-                log_path = inst_log_dir / "test_output.txt"
-                with open(log_path, "w") as f:
-                    f.write(res["output"])
-                    
-                # Compute report
-                try:
-                    report = get_valid_report(
-                        val_pregold_path=str(baseline_log_path),
-                        val_postgold_path=str(log_path),
-                        instance=patches[i]
-                    )
-                    
-                    # Save individual report.json to match swe-smith structure
-                    with open(inst_log_dir / "report.json", "w") as f:
-                        json.dump(report, f, indent=4)
-                        
-                    reports.append({
-                        "instance_id": inst_id,
-                        "report": report
+                patches = gen_result.get("patches", [])
+                if not patches:
+                    all_results.append({
+                        "repo": gen_result["repo"],
+                        "total_bugs": 0,
+                        "valid_bugs": 0
                     })
-                    
-                    # A bug is valid if it causes tests to fail (PASS in clean, FAIL with bug)
-                    if len(report.get("PASS_TO_FAIL", [])) > 0:
-                        valid_bugs_count += 1
-                except Exception as e:
-                    print(f"Error grading {inst_id}: {e}")
-            
-            # Save final validation summary
-            with open(valid_results_dir / "validation_summary.json", "w") as f:
-                json.dump(reports, f, indent=2)
+                    continue
                 
-            print(f"\nValidation Complete!")
-            print(f"Total Bugs Created: {len(patches)}")
-            print(f"Valid Bugs (P2F > 0): {valid_bugs_count}")
-            print(f"Detailed logs at: {valid_results_dir}")
+                try:
+                    profile = resolve_profile(gen_result["repo"])
+                    val_result = process_single_repo_validation(
+                        gen_result["repo"],
+                        gen_result["repo_id"],
+                        patches,
+                        profile
+                    )
+                    all_results.append(val_result)
+                except Exception as e:
+                    all_results.append({
+                        "repo": gen_result["repo"],
+                        "error": f"Validation failed: {e}"
+                    })
+        else:
+            # Validate-only mode
+            print(f"\n{'#'*60}")
+            print(f"# VALIDATION ONLY MODE")
+            print(f"{'#'*60}")
+            
+            for repo in repos_to_process:
+                try:
+                    profile = resolve_profile(repo)
+                    repo_id = profile.repo_name
+                    
+                    patches_file = Path(f"logs/bug_gen/{repo_id}_all_patches.json")
+                    if not patches_file.exists():
+                        all_results.append({
+                            "repo": repo,
+                            "error": f"Patches file {patches_file} not found"
+                        })
+                        continue
+                    
+                    with open(patches_file, "r") as f:
+                        patches = json.load(f)
+                    
+                    if not patches:
+                        all_results.append({
+                            "repo": repo,
+                            "total_bugs": 0,
+                            "valid_bugs": 0
+                        })
+                        continue
+                    
+                    val_result = process_single_repo_validation(
+                        repo, repo_id, patches, profile
+                    )
+                    all_results.append(val_result)
+                except Exception as e:
+                    all_results.append({
+                        "repo": repo,
+                        "error": f"Failed: {e}"
+                    })
+    
+    # Print summary
+    print("\n" + "="*60)
+    print("SUMMARY")
+    print("="*60)
+    
+    total_bugs = 0
+    total_valid = 0
+    errors = []
+    
+    for result in all_results:
+        repo = result.get("repo", "unknown")
+        if "error" in result:
+            errors.append(f"{repo}: {result['error']}")
+        else:
+            bugs = result.get("total_bugs", 0)
+            valid = result.get("valid_bugs", 0)
+            total_bugs += bugs
+            total_valid += valid
+            print(f"{repo}: {valid}/{bugs} valid bugs")
+    
+    print(f"\nTotal: {total_valid}/{total_bugs} valid bugs across {len(repos_to_process)} repos")
+    
+    if errors:
+        print(f"\nErrors ({len(errors)}):")
+        for err in errors:
+            print(f"  - {err}")
