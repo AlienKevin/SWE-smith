@@ -427,3 +427,113 @@ class OperationBreakChainsModifier(JavaScriptProceduralModifier):
             )
 
         return modified_source.decode("utf-8")
+
+
+class AugmentedAssignmentSwapModifier(JavaScriptProceduralModifier):
+    """Swap augmented assignment operators (+=, -=, *=, /=, etc.) and update expressions (++, --)"""
+
+    explanation: str = "The augmented assignment or update operator is likely incorrect."
+    name: str = "func_pm_aug_assign_swap"
+    conditions: list = [CodeProperty.IS_FUNCTION, CodeProperty.HAS_ASSIGNMENT]
+
+    def modify(self, code_entity: CodeEntity) -> BugRewrite:
+        """Swap augmented assignment operators."""
+        if not self.flip():
+            return None
+
+        parser = Parser(JS_LANGUAGE)
+        tree = parser.parse(bytes(code_entity.src_code, "utf8"))
+
+        modified_code = self._swap_augmented_assignments(
+            code_entity.src_code, tree.root_node
+        )
+
+        if modified_code == code_entity.src_code:
+            return None
+
+        return BugRewrite(
+            rewrite=modified_code,
+            explanation=self.explanation,
+            strategy=self.name,
+        )
+
+    def _swap_augmented_assignments(self, source_code: str, node) -> str:
+        """Find and swap augmented assignment operators and update expressions."""
+        changes = []
+        source_bytes = source_code.encode("utf-8")
+
+        # Augmented assignment operator swap pairs
+        aug_assign_swaps = {
+            # Arithmetic
+            "+=": "-=",
+            "-=": "+=",
+            "*=": "/=",
+            "/=": "*=",
+            "%=": "/=",
+            # Bitwise
+            "&=": "|=",
+            "|=": "&=",
+            "^=": "&=",
+            # Shift
+            "<<=": ">>=",
+            ">>=": "<<=",
+            ">>>=": "<<=",  # Unsigned right shift
+            # Logical (ES2021)
+            "&&=": "||=",
+            "||=": "&&=",
+            "??=": "||=",  # Nullish coalescing assignment
+            # Exponentiation
+            "**=": "*=",
+        }
+
+        # Update expression swaps (++, --)
+        update_swaps = {
+            "++": "--",
+            "--": "++",
+        }
+
+        def collect_augmented_assignments(n):
+            # Handle augmented assignment expressions (+=, -=, etc.)
+            if n.type == "augmented_assignment_expression":
+                # Find the operator child
+                for child in n.children:
+                    op_text = source_bytes[child.start_byte : child.end_byte].decode(
+                        "utf-8"
+                    )
+                    if op_text in aug_assign_swaps and self.flip():
+                        changes.append(
+                            {"node": child, "new_op": aug_assign_swaps[op_text]}
+                        )
+                        break
+
+            # Handle update expressions (++, --)
+            elif n.type == "update_expression":
+                for child in n.children:
+                    op_text = source_bytes[child.start_byte : child.end_byte].decode(
+                        "utf-8"
+                    )
+                    if op_text in update_swaps and self.flip():
+                        changes.append({"node": child, "new_op": update_swaps[op_text]})
+                        break
+
+            for child in n.children:
+                collect_augmented_assignments(child)
+
+        collect_augmented_assignments(node)
+
+        if not changes:
+            return source_code
+
+        # Work with bytes for modifications
+        modified_source = source_bytes
+        for change in reversed(changes):
+            node = change["node"]
+            new_op = change["new_op"]
+
+            modified_source = (
+                modified_source[: node.start_byte]
+                + new_op.encode("utf-8")
+                + modified_source[node.end_byte :]
+            )
+
+        return modified_source.decode("utf-8")
