@@ -8,6 +8,7 @@ from swesmith.bug_gen.procedural.javascript.operations import (
     OperationBreakChainsModifier,
     AugmentedAssignmentSwapModifier,
     TernaryOperatorSwapModifier,
+    FunctionArgumentSwapModifier,
 )
 from swesmith.bug_gen.procedural.javascript.control_flow import (
     ControlIfElseInvertModifier,
@@ -21,7 +22,7 @@ from swesmith.bug_gen.procedural.javascript.remove import (
 )
 
 MODIFIERS_JAVASCRIPT: list[ProceduralModifier] = [
-    # Operation modifiers (7)
+    # Operation modifiers (8)
     OperationChangeModifier(likelihood=0.5),
     OperationFlipOperatorModifier(likelihood=0.5),
     OperationSwapOperandsModifier(likelihood=0.5),
@@ -29,6 +30,7 @@ MODIFIERS_JAVASCRIPT: list[ProceduralModifier] = [
     OperationBreakChainsModifier(likelihood=0.5),
     AugmentedAssignmentSwapModifier(likelihood=0.5),
     TernaryOperatorSwapModifier(likelihood=0.5),
+    FunctionArgumentSwapModifier(likelihood=0.5),
     # Control flow modifiers (2)
     ControlIfElseInvertModifier(likelihood=0.5),
     ControlShuffleLinesModifier(likelihood=0.5),

@@ -621,3 +621,103 @@ class TernaryOperatorSwapModifier(JavaScriptProceduralModifier):
 
         return modified_source.decode("utf-8")
 
+
+class FunctionArgumentSwapModifier(JavaScriptProceduralModifier):
+    """Swap adjacent arguments in function calls."""
+
+    explanation: str = "The function arguments may be in the wrong order."
+    name: str = "func_pm_arg_swap"
+    conditions: list = [CodeProperty.IS_FUNCTION, CodeProperty.HAS_FUNCTION_CALL]
+
+    def modify(self, code_entity: CodeEntity) -> BugRewrite:
+        """Swap adjacent arguments in function calls."""
+        parser = Parser(JS_LANGUAGE)
+        tree = parser.parse(bytes(code_entity.src_code, "utf8"))
+
+        modified_code = self._swap_arguments(code_entity.src_code, tree.root_node)
+
+        if modified_code == code_entity.src_code:
+            return None
+
+        return BugRewrite(
+            rewrite=modified_code,
+            explanation=self.explanation,
+            strategy=self.name,
+        )
+
+    def _swap_arguments(self, source_code: str, node) -> str:
+        """Find function calls and swap adjacent arguments."""
+        changes = []
+        source_bytes = source_code.encode("utf-8")
+
+        def collect_function_calls(n):
+            if n.type == "call_expression":
+                # Find the arguments node
+                args_node = None
+                for child in n.children:
+                    if child.type == "arguments":
+                        args_node = child
+                        break
+                
+                if args_node:
+                    # Get actual arguments (skip parentheses and commas)
+                    args = [
+                        c for c in args_node.children 
+                        if c.type not in ["(", ")", ","]
+                    ]
+                    
+                    # Need at least 2 arguments to swap
+                    if len(args) >= 2 and self.flip():
+                        # Choose which pair to swap
+                        swap_idx = self.rand.randint(0, len(args) - 2)
+                        changes.append({
+                            "args_node": args_node,
+                            "args": args,
+                            "swap_idx": swap_idx,
+                        })
+
+            for child in n.children:
+                collect_function_calls(child)
+
+        collect_function_calls(node)
+
+        if not changes:
+            return source_code
+
+        # Work with bytes for modifications
+        modified_source = source_bytes
+        for change in reversed(changes):
+            args_node = change["args_node"]
+            args = change["args"]
+            swap_idx = change["swap_idx"]
+
+            # Get the two arguments to swap
+            arg1 = args[swap_idx]
+            arg2 = args[swap_idx + 1]
+
+            arg1_text = source_bytes[arg1.start_byte : arg1.end_byte].decode("utf-8")
+            arg2_text = source_bytes[arg2.start_byte : arg2.end_byte].decode("utf-8")
+
+            # Reconstruct the arguments list with swapped args
+            new_args_parts = []
+            for i, arg in enumerate(args):
+                if i == swap_idx:
+                    new_args_parts.append(arg2_text)
+                elif i == swap_idx + 1:
+                    new_args_parts.append(arg1_text)
+                else:
+                    new_args_parts.append(
+                        source_bytes[arg.start_byte : arg.end_byte].decode("utf-8")
+                    )
+
+            new_args = "(" + ", ".join(new_args_parts) + ")"
+
+            modified_source = (
+                modified_source[: args_node.start_byte]
+                + new_args.encode("utf-8")
+                + modified_source[args_node.end_byte :]
+            )
+
+        return modified_source.decode("utf-8")
+
+
