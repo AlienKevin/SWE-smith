@@ -115,7 +115,9 @@ def parse_log_mocha(log: str) -> dict[str, str]:
 def parse_log_vitest(log: str) -> dict[str, str]:
     test_status_map = {}
     patterns = [
+        # Vitest uses ✓ for passing test files and ❯ for test files with failures
         (r"^✓\s+(.+?)(?:\s+\([\.\d]+ms\))?$", TestStatus.PASSED.value),
+        (r"^❯\s+(.+?)(?:\s+\(.*?\))?$", TestStatus.FAILED.value),  # Failed test files
         (r"^✗\s+(.+?)(?:\s+\([\.\d]+ms\))?$", TestStatus.FAILED.value),
         (r"^○\s+(.+?)(?:\s+\([\.\d]+ms\))?$", TestStatus.SKIPPED.value),
         (r"^✓\s+(.+?)$", TestStatus.PASSED.value),
@@ -127,6 +129,11 @@ def parse_log_vitest(log: str) -> dict[str, str]:
             match = re.match(pattern, line.strip())
             if match:
                 test_name = match.group(1).strip()
+                # Normalize test file names: extract just the file path before parentheses
+                # e.g., "test/foo.test.js (9 tests)" -> "test/foo.test.js"
+                # or "test/foo.test.js (9 tests | 5 failed) 22ms" -> "test/foo.test.js"
+                if '(' in test_name:
+                    test_name = test_name.split('(')[0].strip()
                 test_status_map[test_name] = status
                 break
 
