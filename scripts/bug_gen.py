@@ -226,9 +226,11 @@ def run_validation_in_sandbox(
     validator_image = get_validator_image(image_name)
     
     # Build the script to run inside the sandbox
+    # Use set -uxo pipefail with : 'marker' for proper synchronization
+    # The -x flag traces commands, ensuring markers appear in correct order relative to test output
     script_lines = [
         "#!/bin/bash",
-        "set -e",
+        "set -uxo pipefail",
         f"cd {workdir}",
         "git checkout .",  # Clean state
     ]
@@ -242,11 +244,12 @@ def run_validation_in_sandbox(
             f"git apply /tmp/{instance_id}.diff",
         ])
     
-    # Run tests with markers
+    # Run tests with markers - using : (no-op) with shell tracing (-x) ensures
+    # markers appear at the right time in the output stream
     script_lines.extend([
-        f"echo \"+ : '{TEST_OUTPUT_START}'\"",
+        f": '{TEST_OUTPUT_START}'",
         f"{test_cmd} || true",  # Don't fail on test failures
-        f"echo \"+ : '{TEST_OUTPUT_END}'\"",
+        f": '{TEST_OUTPUT_END}'",
     ])
     
     script = "\n".join(script_lines)
