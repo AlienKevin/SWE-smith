@@ -412,7 +412,7 @@ class Dayjsc8a26460(JavaScriptProfile):
         return default_npm_install_dockerfile(self.mirror_name)
 
     def log_parser(self, log: str) -> dict[str, str]:
-        return parse_log_mocha(log)
+        return parse_log_jest(log)
 
 
 @dataclass
@@ -588,7 +588,7 @@ class Qd180f4a0(JavaScriptProfile):
     owner: str = "kriskowal"
     repo: str = "q"
     commit: str = "d180f4a0b22499607ac750b56766c8829d6bff43"
-    test_cmd: str = "npm run test -- --verbose"
+    test_cmd: str = "npm run test -- --verbose --reporter spec"
 
     @property
     def dockerfile(self):
@@ -1281,7 +1281,7 @@ class Modernizr1d4c9cee(JavaScriptProfile):
     owner: str = "Modernizr"
     repo: str = "Modernizr"
     commit: str = "1d4c9cee1f358f50c31be9a1f247e1153ed9143c"
-    test_cmd: str = "npm test -- --verbose"
+    test_cmd: str = "npm test -- --verbose --reporter spec"
 
     @property
     def dockerfile(self):
@@ -1345,7 +1345,7 @@ class Pm2ff1ca974(JavaScriptProfile):
     owner: str = "Unitech"
     repo: str = "pm2"
     commit: str = "ff1ca974afada8730aa55f8ed1df40e700cedbcb"
-    test_cmd: str = "npm run test:unit"
+    test_cmd: str = "npm run test:unit -- --reporter spec"
 
     @property
     def dockerfile(self):
