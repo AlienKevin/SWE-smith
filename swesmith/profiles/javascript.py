@@ -2444,6 +2444,7 @@ class Ws726c3732(JavaScriptProfile):
     repo: str = "ws"
     commit: str = "726c3732b3e5319219ed73cac4826fd36917e2e1"
     test_cmd: str = "npm test -- --reporter spec"
+    timeout: int = 300
 
     @property
     def dockerfile(self):
