@@ -230,6 +230,7 @@ def run_validation_in_sandbox(
     # The -x flag traces commands, ensuring markers appear in correct order relative to test output
     script_lines = [
         "#!/bin/bash",
+        "exec 2>&1",      # Merge stderr into stdout at the script level
         "set -uxo pipefail",
         f"cd {workdir}",
         "git checkout .",  # Clean state
@@ -263,18 +264,24 @@ def run_validation_in_sandbox(
         )
         
         # Run the script
+        # Redirection 'exec 2>&1' inside the script handles the merge without PTY side effects
         process = sb.exec("bash", "-c", script)
         
         # Wait for completion and get output
-        stdout = process.stdout.read()
-        stderr = process.stderr.read()
+        output_raw = process.stdout.read()
         exit_code = process.wait()
         
         sb.terminate()
         
+        # Decode bytes to string if necessary, replacing invalid characters
+        if isinstance(output_raw, bytes):
+            output = output_raw.decode("utf-8", errors="replace")
+        else:
+            output = output_raw
+        
         return {
             "instance_id": instance_id,
-            "output": stdout + stderr,
+            "output": output,
             "exit_code": exit_code,
         }
     except Exception as e:
