@@ -109,7 +109,7 @@ app = modal.App(APP_NAME)
     secrets=[modal.Secret.from_name("GITHUB_TOKEN")],
     timeout=5 * MINUTES,
 )
-def generate_bugs_remote(repo_name: str, max_bugs: int, interleave: bool) -> dict:
+def generate_bugs_remote(repo_name: str, max_bugs: int, interleave: bool, max_entities: int = 1000) -> dict:
     """
     Generates bugs for the repository on a remote Modal worker.
     """
@@ -126,7 +126,7 @@ def generate_bugs_remote(repo_name: str, max_bugs: int, interleave: bool) -> dic
 
     print(f"CWD: {os.getcwd()}")
     print(f"PYTHONPATH: {os.environ.get('PYTHONPATH')}")
-    print(f"Starting bug generation for {repo_name}...")
+    print(f"Starting bug generation for {repo_name} with max_entities={max_entities}...")
     
     # Identify Repo ID
     try:
@@ -150,12 +150,13 @@ def generate_bugs_remote(repo_name: str, max_bugs: int, interleave: bool) -> dic
             repo_id = repo_name 
 
     try:
-        print(f"Calling generate_main with repo={repo_id}, max_bugs={max_bugs}...")
+        print(f"Calling generate_main with repo={repo_id}, max_bugs={max_bugs}, max_entities={max_entities}...")
         generate_main(
             repo=repo_id,
             max_bugs=max_bugs,
             seed=24,
-            interleave=interleave
+            interleave=interleave,
+            max_entities=max_entities
         )
     except Exception as e:
         print(f"Error in generate_main: {e}")
@@ -291,7 +292,7 @@ def run_validation_in_sandbox(
         }
 
 
-def spawn_generation_task(repo_name: str, max_bugs: int, interleave: bool):
+def spawn_generation_task(repo_name: str, max_bugs: int, interleave: bool, max_entities: int = 1000):
     """
     Spawn a generation task without blocking (returns a FunctionCall handle).
     Returns (repo_name, repo_id, handle) or (repo_name, None, error_dict) on failure.
@@ -305,7 +306,8 @@ def spawn_generation_task(repo_name: str, max_bugs: int, interleave: bool):
         handle = generate_bugs_remote.spawn(
             repo_name=repo_name,
             max_bugs=max_bugs,
-            interleave=interleave
+            interleave=interleave,
+            max_entities=max_entities
         )
         return (repo_name, repo_id, handle)
     except Exception as e:
@@ -509,6 +511,7 @@ if __name__ == "__main__":
     parser.add_argument("--language", required=True, help="Language (e.g. javascript, python, golang)")
     parser.add_argument("--max-bugs", type=int, default=100, help="Max bugs per modifier")
     parser.add_argument("--interleave", action="store_true", help="Interleave modifiers")
+    parser.add_argument("--max-entities", type=int, default=1000, help="Maximum number of entities to sample from repositories. Set to -1 to disable sampling.")
     parser.add_argument("--validate-only", action="store_true", help="Skip generation and only run validation using local logs")
     
     args = parser.parse_args()
@@ -540,7 +543,7 @@ if __name__ == "__main__":
             spawn_results = []
             for repo in repos_to_process:
                 spawn_results.append(
-                    spawn_generation_task(repo, args.max_bugs, args.interleave)
+                    spawn_generation_task(repo, args.max_bugs, args.interleave, args.max_entities)
                 )
             
             print(f"\nSpawned {len(spawn_results)} generation tasks. Waiting for results...")

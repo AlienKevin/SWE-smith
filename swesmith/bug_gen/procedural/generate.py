@@ -66,13 +66,22 @@ def main(
     max_bugs: int,
     seed: int,
     interleave: bool = False,
+    max_entities: int = -1,
 ):
     random.seed(seed)
     total = 0
     rp = registry.get(repo)
     rp.clone()
     entities = rp.extract_entities()
-    print(f"Found {len(entities)} entities in {repo}.")
+    
+    # Apply entity sampling if limit is set and exceeded
+    original_count = len(entities)
+    if max_entities > 0 and original_count > max_entities:
+        random.shuffle(entities)
+        entities = entities[:max_entities]
+        print(f"Found {original_count} entities in {repo}, sampled down to {max_entities} for efficiency.")
+    else:
+        print(f"Found {len(entities)} entities in {repo}.")
 
     log_dir = LOG_DIR_BUG_GEN / repo
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -156,6 +165,12 @@ if __name__ == "__main__":
         "--interleave",
         action="store_true",
         help="Randomize and interleave modifiers instead of processing sequentially.",
+    )
+    parser.add_argument(
+        "--max_entities",
+        type=int,
+        default=1000,
+        help="Maximum number of entities to sample from the repository. Set to -1 to disable sampling.",
     )
 
     args = parser.parse_args()
