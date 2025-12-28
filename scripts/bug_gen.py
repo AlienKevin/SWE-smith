@@ -104,19 +104,38 @@ def get_validator_image(image_name: str) -> modal.Image:
 app = modal.App(APP_NAME)
 
 
+def _safe_execute(func, error_msg: str, *args, **kwargs):
+    """Helper to execute a function with error handling and traceback."""
+    import traceback
+    try:
+        return func(*args, **kwargs)
+    except Exception as e:
+        print(f"{error_msg}: {e}")
+        traceback.print_exc()
+        return None
+
+
+MODAL_TIMEOUT = 5 * MINUTES
+
+
 @app.function(
     image=generator_image,
     secrets=[modal.Secret.from_name("GITHUB_TOKEN")],
-    timeout=5 * MINUTES,
+    timeout=MODAL_TIMEOUT,
 )
-def generate_bugs_remote(repo_name: str, max_bugs: int, interleave: bool, max_entities: int, max_candidates: int) -> dict:
+def generate_bugs_remote(repo_name: str, max_bugs: int, interleave: bool, max_entities: int, max_candidates: int, timeout_buffer_seconds: int = 15) -> dict:
     """
     Generates bugs for the repository on a remote Modal worker.
+    Uses try-finally to ensure partial results are saved even on timeout/cancellation.
+    
+    Args:
+        timeout_buffer_seconds: Soft timeout triggers this many seconds before Modal's hard timeout,
+                               giving the finally block time to collect and return partial results.
     """
     import os
     import sys
     from io import StringIO
-    from contextlib import redirect_stdout, redirect_stderr
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
     # Add /root to sys.path to be double sure
     if "/root" not in sys.path:
@@ -125,108 +144,131 @@ def generate_bugs_remote(repo_name: str, max_bugs: int, interleave: bool, max_en
     from swesmith.profiles import registry
     from swesmith.bug_gen.procedural.generate import main as generate_main
     from swesmith.bug_gen.collect_patches import main as collect_patches_main
-    import traceback
 
-    # Capture all stdout and stderr for logging
+    # Capture all stdout and stderr for logging while also mirroring to original streams
     log_buffer = StringIO()
     original_stdout = sys.stdout
     original_stderr = sys.stderr
     artifacts = {}
 
-    print(f"CWD: {os.getcwd()}")
-    print(f"PYTHONPATH: {os.environ.get('PYTHONPATH')}")
-    print(f"Starting bug generation for {repo_name} with max_entities={max_entities}...")
+    class TeeWriter:
+        """Write to both a buffer and the original stream."""
+        def __init__(self, buffer, original):
+            self.buffer = buffer
+            self.original = original
+        def write(self, data):
+            self.buffer.write(data)
+            self.original.write(data)
+        def flush(self):
+            self.buffer.flush()
+            self.original.flush()
 
-    # Redirect all stdout and stderr to capture intermediate logs
-    sys.stdout = log_buffer
-    sys.stderr = log_buffer
-
-    print(f"CWD: {os.getcwd()}")
-    print(f"PYTHONPATH: {os.environ.get('PYTHONPATH')}")
-    print(f"Starting bug generation for {repo_name} with max_entities={max_entities}...")
+    # Redirect stdout/stderr to capture logs while mirroring to original streams
+    sys.stdout = TeeWriter(log_buffer, original_stdout)
+    sys.stderr = TeeWriter(log_buffer, original_stderr)
 
     # Identify Repo ID
-    profile = None
     repo_id = repo_name
-    try:
-        profile = registry.get_from_inst({"repo": repo_name, "instance_id": "dummy"})
-        repo_id = profile.repo_name
-    except Exception as e:
-        print(f"Direct profile lookup failed for {repo_name}: {e}")
-        # Search registry for matching key
-        candidates = []
-        target = repo_name.replace("/", "__")
-        for key in registry.keys():
-            if target in key:
-                candidates.append(key)
+    def resolve_repo_id():
+        try:
+            profile = registry.get_from_inst({"repo": repo_name, "instance_id": "dummy"})
+            return profile.repo_name
+        except Exception as e:
+            print(f"Direct profile lookup failed for {repo_name}: {e}")
+            target = repo_name.replace("/", "__")
+            candidates = [key for key in registry.keys() if target in key]
+            if candidates:
+                return candidates[0]
+            return repo_name
 
-        if candidates:
-            repo_id = candidates[0]
-            print(f"Resolved {repo_name} to profile key {repo_id}")
-        else:
-            print(f"Warning: No matching profile found for {repo_name} in registry. Using original name.")
-            repo_id = repo_name
+    repo_id = resolve_repo_id()
+    print(f"Resolved repo_id: {repo_id}")
 
-    # Call generate_main
-    try:
-        print(f"Calling generate_main with repo={repo_id}, max_bugs={max_bugs}, max_entities={max_entities}, max_candidates={max_candidates}...")
-        generate_main(
-            repo=repo_id,
-            max_bugs=max_bugs,
-            seed=24,
-            interleave=interleave,
-            max_entities=max_entities,
-            max_candidates=max_candidates
-        )
-    except Exception as e:
-        print(f"Error in generate_main: {e}")
-
-    # Collect patches
     logs_base = Path("logs/bug_gen")
-    if not logs_base.exists():
-         print(f"LOGS BASE MISSING: {logs_base}")
-         # Maybe it's in the current dir?
-         if Path(repo_id).exists():
-              print(f"Found repo dir {repo_id} in current dir, but logs/bug_gen is missing.")
 
-    generated_repo_dirs = [d for d in logs_base.iterdir() if d.is_dir()]
-    if not generated_repo_dirs:
-         files = [str(p) for p in logs_base.glob("**/*")]
-         print(f"NO DATA IN LOGS BASE. Files found: {files}")
+    # Helper to collect and return results
+    def collect_results():
+        if not logs_base.exists():
+            print(f"LOGS BASE MISSING: {logs_base}")
+            if Path(repo_id).exists():
+                print(f"Found repo dir {repo_id} in current dir, but logs/bug_gen is missing.")
+            return
 
-    # Sort to pick the most recently created repo dir if multiple exist
-    generated_repo_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-    repo_id_actual = generated_repo_dirs[0].name
-    print(f"Detected repo_id_actual: {repo_id_actual}")
+        generated_repo_dirs = [d for d in logs_base.iterdir() if d.is_dir()]
+        if not generated_repo_dirs:
+            files = [str(p) for p in logs_base.glob("**/*")]
+            print(f"NO DATA IN LOGS BASE. Files found: {files}")
+            return
 
-    # Run collection
-    collect_patches_main(str(logs_base / repo_id_actual))
+        repo_id_actual = sorted(generated_repo_dirs, key=lambda x: x.stat().st_mtime, reverse=True)[0].name
+        print(f"Detected repo_id_actual: {repo_id_actual}")
 
-    # Zip the bug gen dir
-    shutil.make_archive(f"/tmp/{repo_id_actual}", 'zip', str(logs_base / repo_id_actual))
-    with open(f"/tmp/{repo_id_actual}.zip", "rb") as f:
-        artifacts["bug_gen_zip"] = f.read()
+        # Collect patches (don't check return value - collect_patches_main returns None on success)
+        _safe_execute(collect_patches_main, "Error in collect_patches_main", str(logs_base / repo_id_actual))
 
-    # Get the all_patches.json
-    patches_file = logs_base / f"{repo_id_actual}_all_patches.json"
-    if patches_file.exists():
-        with open(patches_file, "r") as f:
-            artifacts["patches_json"] = f.read()
-            print(f"Successfully read patches_json: {len(artifacts['patches_json'])} bytes")
-    else:
-        existing_files = [str(p.name) for p in logs_base.iterdir()]
-        print(f"Patches file {patches_file} not found. Available: {existing_files}")
+        # Zip the bug gen dir
+        def _zip_and_save():
+            shutil.make_archive(f"/tmp/{repo_id_actual}", 'zip', str(logs_base / repo_id_actual))
+            with open(f"/tmp/{repo_id_actual}.zip", "rb") as f:
+                artifacts["bug_gen_zip"] = f.read()
+                print(f"Created bug_gen_zip: {len(artifacts['bug_gen_zip'])} bytes")
 
-    # Restore stdout/stderr and capture the logs
-    sys.stdout = original_stdout
-    sys.stderr = original_stderr
+        _safe_execute(_zip_and_save, "Error creating bug_gen_zip")
 
-    artifacts["modal_output_log"] = log_buffer.getvalue()
-    print(f"Captured {len(artifacts['modal_output_log'])} bytes of logs")
+        # Get the all_patches.json
+        patches_file = logs_base / f"{repo_id_actual}_all_patches.json"
+        if patches_file.exists():
+            with open(patches_file, "r") as f:
+                artifacts["patches_json"] = f.read()
+                print(f"Successfully read patches_json: {len(artifacts['patches_json'])} bytes")
+        else:
+            existing_files = [str(p.name) for p in logs_base.iterdir()]
+            print(f"Patches file {patches_file} not found. Available: {existing_files}")
 
-    # Return error if logs_base didn't exist
-    if not logs_base.exists():
-        artifacts["error"] = f"Logs directory {logs_base} does not exist."
+    # Calculate soft timeout to ensure finally block has time to run
+    soft_timeout = MODAL_TIMEOUT - timeout_buffer_seconds
+    print(f"Soft timeout set to {soft_timeout}s (Modal timeout: {MODAL_TIMEOUT}s, buffer: {timeout_buffer_seconds}s)")
+
+    # Use try-finally to ensure partial results are saved even on timeout/cancellation
+    try:
+        # Run generate_main in a thread with soft timeout
+        def run_generation():
+            return generate_main(
+                repo=repo_id, max_bugs=max_bugs, seed=24, interleave=interleave,
+                max_entities=max_entities, max_candidates=max_candidates
+            )
+        
+        executor = ThreadPoolExecutor(max_workers=1)
+        try:
+            future = executor.submit(run_generation)
+            try:
+                future.result(timeout=soft_timeout)
+            except FuturesTimeoutError:
+                print(f"\n*** SOFT TIMEOUT: Generation exceeded {soft_timeout}s, collecting partial results ***")
+                # Cancel the future and don't wait for thread completion
+                future.cancel()
+            except Exception as e:
+                print(f"Error in generate_main: {e}")
+                import traceback
+                traceback.print_exc()
+        finally:
+            # Shutdown without waiting to avoid blocking on the hung thread
+            executor.shutdown(wait=False)
+    finally:
+        # Restore stdout/stderr and collect results
+        sys.stdout = original_stdout
+        sys.stderr = original_stderr
+        print("\nCollecting partial results...")
+
+        _safe_execute(collect_results, "Error collecting partial results")
+
+        # Capture logs
+        artifacts["modal_output_log"] = log_buffer.getvalue()
+        print(f"Captured {len(artifacts['modal_output_log'])} bytes of logs")
+
+        # Mark error if logs_base doesn't exist
+        if not logs_base.exists():
+            artifacts["error"] = f"Logs directory {logs_base} does not exist."
 
     return artifacts
 
@@ -354,22 +396,27 @@ def process_generation_result(repo_name: str, repo_id: str, results: dict) -> di
     # Parse result patches
     if "patches_json" not in results:
         print(f"Warning: No patches_json returned for {repo_name}")
+        # Always save logs for debugging, even without bug_gen_zip
+        local_bug_dir = Path(f"logs/bug_gen/{repo_id}")
+        local_bug_dir.mkdir(parents=True, exist_ok=True)
+        
         if "bug_gen_zip" in results:
             print("Saving bug_gen_zip for manual inspection...")
-            local_bug_dir = Path(f"logs/bug_gen/{repo_id}")
-            local_bug_dir.mkdir(parents=True, exist_ok=True)
             zip_path = local_bug_dir / "bugs.zip"
             with open(zip_path, "wb") as f:
                 f.write(results["bug_gen_zip"])
             subprocess.run(["unzip", "-o", str(zip_path), "-d", str(local_bug_dir)], check=True)
             print(f"Bugs extracted to {local_bug_dir}")
 
-            # Save modal output log if available
-            if "modal_output_log" in results and results["modal_output_log"]:
-                log_path = local_bug_dir / "modal_output.log"
-                with open(log_path, "w") as f:
-                    f.write(results["modal_output_log"])
-                print(f"Modal output logs saved to {log_path}")
+        # Save modal output log if available (always, for debugging)
+        if "modal_output_log" in results and results["modal_output_log"]:
+            log_path = local_bug_dir / "modal_output.log"
+            with open(log_path, "w") as f:
+                f.write(results["modal_output_log"])
+            print(f"Modal output logs saved to {log_path}")
+        else:
+            print(f"Warning: No modal_output_log in results for {repo_name}")
+            print(f"Results keys: {list(results.keys())}")
 
         return {"repo": repo_name, "repo_id": repo_id, "error": "No patches_json returned"}
 
