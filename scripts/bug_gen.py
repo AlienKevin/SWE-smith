@@ -135,7 +135,6 @@ def generate_bugs_remote(repo_name: str, max_bugs: int, interleave: bool, max_en
     import os
     import sys
     from io import StringIO
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
     # Add /root to sys.path to be double sure
     if "/root" not in sys.path:
@@ -231,29 +230,16 @@ def generate_bugs_remote(repo_name: str, max_bugs: int, interleave: bool, max_en
 
     # Use try-finally to ensure partial results are saved even on timeout/cancellation
     try:
-        # Run generate_main in a thread with soft timeout
-        def run_generation():
-            return generate_main(
-                repo=repo_id, max_bugs=max_bugs, seed=24, interleave=interleave,
-                max_entities=max_entities, max_candidates=max_candidates
-            )
-        
-        executor = ThreadPoolExecutor(max_workers=1)
-        try:
-            future = executor.submit(run_generation)
-            try:
-                future.result(timeout=soft_timeout)
-            except FuturesTimeoutError:
-                print(f"\n*** SOFT TIMEOUT: Generation exceeded {soft_timeout}s, collecting partial results ***")
-                # Cancel the future and don't wait for thread completion
-                future.cancel()
-            except Exception as e:
-                print(f"Error in generate_main: {e}")
-                import traceback
-                traceback.print_exc()
-        finally:
-            # Shutdown without waiting to avoid blocking on the hung thread
-            executor.shutdown(wait=False)
+        # Pass timeout to generate_main which will check it after each _process_candidate call
+        generate_main(
+            repo=repo_id, max_bugs=max_bugs, seed=24, interleave=interleave,
+            max_entities=max_entities, max_candidates=max_candidates,
+            timeout_seconds=soft_timeout
+        )
+    except Exception as e:
+        print(f"Error in generate_main: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         # Restore stdout/stderr and collect results
         sys.stdout = original_stdout
