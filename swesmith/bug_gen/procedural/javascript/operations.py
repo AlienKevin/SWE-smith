@@ -2,6 +2,7 @@
 JavaScript operation modifiers for procedural bug generation using tree-sitter.
 """
 
+import sys
 import tree_sitter_javascript as tsjs
 from swesmith.bug_gen.procedural.javascript.base import JavaScriptProceduralModifier
 from swesmith.bug_gen.procedural.base import CommonPMs
@@ -9,6 +10,15 @@ from swesmith.constants import CodeProperty, BugRewrite, CodeEntity
 from tree_sitter import Language, Parser
 
 JS_LANGUAGE = Language(tsjs.language())
+
+
+def _safe_decode(bytes_obj, fallback=""):
+    """Safely decode bytes to UTF-8, handling potential encoding errors."""
+    try:
+        return bytes_obj.decode("utf-8")
+    except UnicodeDecodeError as e:
+        print(f"WARNING: UTF-8 decode error: {e}", file=sys.stderr)
+        return fallback
 
 
 class OperationChangeModifier(JavaScriptProceduralModifier):
@@ -87,7 +97,7 @@ class OperationChangeModifier(JavaScriptProceduralModifier):
                 + modified_source[node.end_byte :]
             )
 
-        return modified_source.decode("utf-8")
+        return _safe_decode(modified_source, source_code)
 
 
 class OperationFlipOperatorModifier(JavaScriptProceduralModifier):
@@ -166,7 +176,7 @@ class OperationFlipOperatorModifier(JavaScriptProceduralModifier):
                 + modified_source[node.end_byte :]
             )
 
-        return modified_source.decode("utf-8")
+        return _safe_decode(modified_source, source_code)
 
 
 class OperationSwapOperandsModifier(JavaScriptProceduralModifier):
@@ -237,8 +247,8 @@ class OperationSwapOperandsModifier(JavaScriptProceduralModifier):
             right = change["right"]
             operator = change["operator"]
 
-            left_text = source_bytes[left.start_byte : left.end_byte].decode("utf-8")
-            right_text = source_bytes[right.start_byte : right.end_byte].decode("utf-8")
+            left_text = _safe_decode(source_bytes[left.start_byte : left.end_byte])
+            right_text = _safe_decode(source_bytes[right.start_byte : right.end_byte])
 
             # Swap: left op right -> right op left
             swapped = f"{right_text} {operator} {left_text}"
@@ -249,7 +259,7 @@ class OperationSwapOperandsModifier(JavaScriptProceduralModifier):
                 + modified_source[node.end_byte :]
             )
 
-        return modified_source.decode("utf-8")
+        return _safe_decode(modified_source, source_code)
 
 
 class OperationChangeConstantsModifier(JavaScriptProceduralModifier):
@@ -285,9 +295,7 @@ class OperationChangeConstantsModifier(JavaScriptProceduralModifier):
             if n.type == "number":
                 if self.flip():
                     try:
-                        value_text = source_bytes[n.start_byte : n.end_byte].decode(
-                            "utf-8"
-                        )
+                        value_text = _safe_decode(source_bytes[n.start_byte : n.end_byte])
                         value = int(value_text)
                         # Small off-by-one changes
                         new_value = value + self.rand.choice([-1, 1, -2, 2])
@@ -315,7 +323,7 @@ class OperationChangeConstantsModifier(JavaScriptProceduralModifier):
                 + modified_source[node.end_byte :]
             )
 
-        return modified_source.decode("utf-8")
+        return _safe_decode(modified_source, source_code)
 
 
 class OperationBreakChainsModifier(JavaScriptProceduralModifier):
@@ -359,15 +367,15 @@ class OperationBreakChainsModifier(JavaScriptProceduralModifier):
                     # (a + b) + c -> b + c (take right of left chain)
                     if len(left.children) >= 3:
                         left_right = left.children[2]
-                        left_right_text = source_bytes[
-                            left_right.start_byte : left_right.end_byte
-                        ].decode("utf-8")
-                        operator_text = source_bytes[
-                            operator.start_byte : operator.end_byte
-                        ].decode("utf-8")
-                        right_text = source_bytes[
-                            right.start_byte : right.end_byte
-                        ].decode("utf-8")
+                        left_right_text = _safe_decode(
+                            source_bytes[left_right.start_byte : left_right.end_byte]
+                        )
+                        operator_text = _safe_decode(
+                            source_bytes[operator.start_byte : operator.end_byte]
+                        )
+                        right_text = _safe_decode(
+                            source_bytes[right.start_byte : right.end_byte]
+                        )
                         changes.append(
                             {
                                 "node": n,
@@ -380,15 +388,15 @@ class OperationBreakChainsModifier(JavaScriptProceduralModifier):
                     # a + (b + c) -> a + b (take left of right chain)
                     if len(right.children) >= 3:
                         right_left = right.children[0]
-                        left_text = source_bytes[
-                            left.start_byte : left.end_byte
-                        ].decode("utf-8")
-                        operator_text = source_bytes[
-                            operator.start_byte : operator.end_byte
-                        ].decode("utf-8")
-                        right_left_text = source_bytes[
-                            right_left.start_byte : right_left.end_byte
-                        ].decode("utf-8")
+                        left_text = _safe_decode(
+                            source_bytes[left.start_byte : left.end_byte]
+                        )
+                        operator_text = _safe_decode(
+                            source_bytes[operator.start_byte : operator.end_byte]
+                        )
+                        right_left_text = _safe_decode(
+                            source_bytes[right_left.start_byte : right_left.end_byte]
+                        )
                         changes.append(
                             {
                                 "node": n,
@@ -416,7 +424,7 @@ class OperationBreakChainsModifier(JavaScriptProceduralModifier):
                 + modified_source[node.end_byte :]
             )
 
-        return modified_source.decode("utf-8")
+        return _safe_decode(modified_source, source_code)
 
 
 class AugmentedAssignmentSwapModifier(JavaScriptProceduralModifier):
@@ -524,7 +532,7 @@ class AugmentedAssignmentSwapModifier(JavaScriptProceduralModifier):
                 + modified_source[node.end_byte :]
             )
 
-        return modified_source.decode("utf-8")
+        return _safe_decode(modified_source, source_code)
 
 
 class TernaryOperatorSwapModifier(JavaScriptProceduralModifier):
@@ -599,9 +607,9 @@ class TernaryOperatorSwapModifier(JavaScriptProceduralModifier):
             alternative = change["alternative"]
             mod_type = change["mod_type"]
 
-            condition_text = source_bytes[condition.start_byte : condition.end_byte].decode("utf-8")
-            consequent_text = source_bytes[consequent.start_byte : consequent.end_byte].decode("utf-8")
-            alternative_text = source_bytes[alternative.start_byte : alternative.end_byte].decode("utf-8")
+            condition_text = _safe_decode(source_bytes[condition.start_byte : condition.end_byte])
+            consequent_text = _safe_decode(source_bytes[consequent.start_byte : consequent.end_byte])
+            alternative_text = _safe_decode(source_bytes[alternative.start_byte : alternative.end_byte])
 
             if mod_type == "swap_branches":
                 # Swap consequent and alternative: a ? b : c -> a ? c : b
@@ -619,7 +627,7 @@ class TernaryOperatorSwapModifier(JavaScriptProceduralModifier):
                 + modified_source[node.end_byte :]
             )
 
-        return modified_source.decode("utf-8")
+        return _safe_decode(modified_source, source_code)
 
 
 class FunctionArgumentSwapModifier(JavaScriptProceduralModifier):
@@ -695,8 +703,8 @@ class FunctionArgumentSwapModifier(JavaScriptProceduralModifier):
             arg1 = args[swap_idx]
             arg2 = args[swap_idx + 1]
 
-            arg1_text = source_bytes[arg1.start_byte : arg1.end_byte].decode("utf-8")
-            arg2_text = source_bytes[arg2.start_byte : arg2.end_byte].decode("utf-8")
+            arg1_text = _safe_decode(source_bytes[arg1.start_byte : arg1.end_byte])
+            arg2_text = _safe_decode(source_bytes[arg2.start_byte : arg2.end_byte])
 
             # Reconstruct the arguments list with swapped args
             new_args_parts = []
@@ -707,7 +715,7 @@ class FunctionArgumentSwapModifier(JavaScriptProceduralModifier):
                     new_args_parts.append(arg1_text)
                 else:
                     new_args_parts.append(
-                        source_bytes[arg.start_byte : arg.end_byte].decode("utf-8")
+                        _safe_decode(source_bytes[arg.start_byte : arg.end_byte])
                     )
 
             new_args = "(" + ", ".join(new_args_parts) + ")"
@@ -718,6 +726,6 @@ class FunctionArgumentSwapModifier(JavaScriptProceduralModifier):
                 + modified_source[args_node.end_byte :]
             )
 
-        return modified_source.decode("utf-8")
+        return _safe_decode(modified_source, source_code)
 
 
