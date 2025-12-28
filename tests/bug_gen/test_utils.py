@@ -43,6 +43,32 @@ class Bar:
             content = f.read()
         self.assertIn("return 42", content)
 
+    def test_apply_code_change_empty_rewrite(self):
+        """Test that empty rewrite is handled gracefully without crashing."""
+        with open(self.test_file) as f:
+            file_content = f.read()
+        node = ast.parse(file_content).body[0]
+        entity = _build_entity(node, file_content, self.test_file)
+        
+        # Original content for comparison
+        with open(self.test_file) as f:
+            original_content = f.read()
+        
+        # Empty rewrite should not crash
+        bug = utils.BugRewrite(
+            rewrite="",  # Empty rewrite
+            explanation="empty rewrite test",
+            strategy="test",
+        )
+        
+        # This should not raise IndexError
+        utils.apply_code_change(entity, bug)
+        
+        # File should remain unchanged
+        with open(self.test_file) as f:
+            content = f.read()
+        self.assertEqual(content, original_content)
+
     def test_apply_patches(self):
         # Create a git repo and patch file
         repo = tempfile.mkdtemp()
