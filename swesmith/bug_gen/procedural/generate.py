@@ -66,7 +66,8 @@ def main(
     max_bugs: int,
     seed: int,
     interleave: bool = False,
-    max_entities: int = -1,
+    max_entities: int = 1000,
+    max_candidates: int = 500,
 ):
     random.seed(seed)
     total = 0
@@ -110,9 +111,18 @@ def main(
 
         # Shuffle all pairs to interleave modifiers
         random.shuffle(pairs)
-        print(
-            f"[{repo}] Processing {len(pairs)} (candidate, modifier) pairs in randomized order."
-        )
+        
+        # Apply max_candidates limit if set
+        original_pairs_len = len(pairs)
+        if max_candidates > 0 and original_pairs_len > max_candidates:
+            pairs = pairs[:max_candidates]
+            print(
+                f"[{repo}] Processing {len(pairs)} (candidate, modifier) pairs (limited from {original_pairs_len})."
+            )
+        else:
+            print(
+                f"[{repo}] Processing {len(pairs)} (candidate, modifier) pairs in randomized order."
+            )
 
         # Process in randomized order
         for candidate, pm in tqdm(pairs):
@@ -133,8 +143,13 @@ def main(
                 if max_bugs > 0 and len(candidates) > max_bugs:
                     candidates = random.sample(candidates, max_bugs)
 
+                # Apply max_candidates limit across all processed pairs
+                processed = 0
                 for candidate in tqdm(candidates):
+                    if max_candidates > 0 and processed >= max_candidates:
+                        break
                     total += _process_candidate(candidate, pm, log_dir, repo)
+                    processed += 1
 
     shutil.rmtree(repo)
     print(f"Generated {total} bugs for {repo}.")
@@ -171,6 +186,12 @@ if __name__ == "__main__":
         type=int,
         default=1000,
         help="Maximum number of entities to sample from the repository. Set to -1 to disable sampling.",
+    )
+    parser.add_argument(
+        "--max_candidates",
+        type=int,
+        default=500,
+        help="Maximum number of (candidate, modifier) pairs to process. Set to -1 to process all.",
     )
 
     args = parser.parse_args()
