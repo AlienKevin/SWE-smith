@@ -66,8 +66,8 @@ def main(
     max_bugs: int,
     seed: int,
     interleave: bool = False,
-    max_entities: int = 1000,
-    max_candidates: int = 500,
+    max_entities: int = -1,
+    max_candidates: int = -1,
 ):
     random.seed(seed)
     total = 0
@@ -184,13 +184,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--max_entities",
         type=int,
-        default=1000,
+        default=-1,
         help="Maximum number of entities to sample from the repository. Set to -1 to disable sampling.",
     )
     parser.add_argument(
         "--max_candidates",
         type=int,
-        default=500,
+        default=-1,
         help="Maximum number of (candidate, modifier) pairs to process. Set to -1 to process all.",
     )
 

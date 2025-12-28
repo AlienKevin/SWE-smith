@@ -109,7 +109,7 @@ app = modal.App(APP_NAME)
     secrets=[modal.Secret.from_name("GITHUB_TOKEN")],
     timeout=5 * MINUTES,
 )
-def generate_bugs_remote(repo_name: str, max_bugs: int, interleave: bool, max_entities: int = 1000, max_candidates: int = 500) -> dict:
+def generate_bugs_remote(repo_name: str, max_bugs: int, interleave: bool, max_entities: int, max_candidates: int) -> dict:
     """
     Generates bugs for the repository on a remote Modal worker.
     """
@@ -317,7 +317,7 @@ def run_validation_in_sandbox(
         }
 
 
-def spawn_generation_task(repo_name: str, max_bugs: int, interleave: bool, max_entities: int = 1000, max_candidates: int = 500):
+def spawn_generation_task(repo_name: str, max_bugs: int, interleave: bool, max_entities: int, max_candidates: int):
     """
     Spawn a generation task without blocking (returns a FunctionCall handle).
     Returns (repo_name, repo_id, handle) or (repo_name, None, error_dict) on failure.
@@ -553,7 +553,7 @@ if __name__ == "__main__":
     parser.add_argument("--max-bugs", type=int, default=100, help="Max bugs per modifier")
     parser.add_argument("--interleave", action="store_true", help="Interleave modifiers")
     parser.add_argument("--max-entities", type=int, default=1000, help="Maximum number of entities to sample from repositories. Set to -1 to disable sampling.")
-    parser.add_argument("--max-candidates", type=int, default=500, help="Maximum number of (candidate, modifier) pairs to process. Set to -1 to process all.")
+    parser.add_argument("--max-candidates", type=int, default=1500, help="Maximum number of (candidate, modifier) pairs to process. Set to -1 to process all.")
     parser.add_argument("--validate-only", action="store_true", help="Skip generation and only run validation using local logs")
     
     args = parser.parse_args()
