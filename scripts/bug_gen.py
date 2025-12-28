@@ -115,6 +115,9 @@ def generate_bugs_remote(repo_name: str, max_bugs: int, interleave: bool, max_en
     """
     import os
     import sys
+    from io import StringIO
+    from contextlib import redirect_stdout, redirect_stderr
+
     # Add /root to sys.path to be double sure
     if "/root" not in sys.path:
         sys.path.append("/root")
@@ -124,15 +127,30 @@ def generate_bugs_remote(repo_name: str, max_bugs: int, interleave: bool, max_en
     from swesmith.bug_gen.collect_patches import main as collect_patches_main
     import traceback
 
+    # Capture all stdout and stderr for logging
+    log_buffer = StringIO()
+    original_stdout = sys.stdout
+    original_stderr = sys.stderr
+    artifacts = {}
+
     print(f"CWD: {os.getcwd()}")
     print(f"PYTHONPATH: {os.environ.get('PYTHONPATH')}")
     print(f"Starting bug generation for {repo_name} with max_entities={max_entities}...")
-    
+
+    # Redirect all stdout and stderr to capture intermediate logs
+    sys.stdout = log_buffer
+    sys.stderr = log_buffer
+
+    print(f"CWD: {os.getcwd()}")
+    print(f"PYTHONPATH: {os.environ.get('PYTHONPATH')}")
+    print(f"Starting bug generation for {repo_name} with max_entities={max_entities}...")
+
     # Identify Repo ID
+    profile = None
+    repo_id = repo_name
     try:
-        # Try direct lookup first
         profile = registry.get_from_inst({"repo": repo_name, "instance_id": "dummy"})
-        repo_id = profile.repo_name 
+        repo_id = profile.repo_name
     except Exception as e:
         print(f"Direct profile lookup failed for {repo_name}: {e}")
         # Search registry for matching key
@@ -141,14 +159,15 @@ def generate_bugs_remote(repo_name: str, max_bugs: int, interleave: bool, max_en
         for key in registry.keys():
             if target in key:
                 candidates.append(key)
-        
+
         if candidates:
             repo_id = candidates[0]
             print(f"Resolved {repo_name} to profile key {repo_id}")
         else:
             print(f"Warning: No matching profile found for {repo_name} in registry. Using original name.")
-            repo_id = repo_name 
+            repo_id = repo_name
 
+    # Call generate_main
     try:
         print(f"Calling generate_main with repo={repo_id}, max_bugs={max_bugs}, max_entities={max_entities}, max_candidates={max_candidates}...")
         generate_main(
@@ -161,7 +180,6 @@ def generate_bugs_remote(repo_name: str, max_bugs: int, interleave: bool, max_en
         )
     except Exception as e:
         print(f"Error in generate_main: {e}")
-        return {"error": str(e), "traceback": traceback.format_exc()}
 
     # Collect patches
     logs_base = Path("logs/bug_gen")
@@ -170,30 +188,25 @@ def generate_bugs_remote(repo_name: str, max_bugs: int, interleave: bool, max_en
          # Maybe it's in the current dir?
          if Path(repo_id).exists():
               print(f"Found repo dir {repo_id} in current dir, but logs/bug_gen is missing.")
-         return {"error": f"Logs directory {logs_base} does not exist."}
-         
+
     generated_repo_dirs = [d for d in logs_base.iterdir() if d.is_dir()]
     if not generated_repo_dirs:
          files = [str(p) for p in logs_base.glob("**/*")]
          print(f"NO DATA IN LOGS BASE. Files found: {files}")
-         return {"error": f"No bug generation directory found in {logs_base}."}
-    
+
     # Sort to pick the most recently created repo dir if multiple exist
     generated_repo_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
     repo_id_actual = generated_repo_dirs[0].name
     print(f"Detected repo_id_actual: {repo_id_actual}")
-    
+
     # Run collection
     collect_patches_main(str(logs_base / repo_id_actual))
-    
-    # Read artifacts
-    artifacts = {}
-    
+
     # Zip the bug gen dir
     shutil.make_archive(f"/tmp/{repo_id_actual}", 'zip', str(logs_base / repo_id_actual))
     with open(f"/tmp/{repo_id_actual}.zip", "rb") as f:
         artifacts["bug_gen_zip"] = f.read()
-        
+
     # Get the all_patches.json
     patches_file = logs_base / f"{repo_id_actual}_all_patches.json"
     if patches_file.exists():
@@ -203,7 +216,18 @@ def generate_bugs_remote(repo_name: str, max_bugs: int, interleave: bool, max_en
     else:
         existing_files = [str(p.name) for p in logs_base.iterdir()]
         print(f"Patches file {patches_file} not found. Available: {existing_files}")
-            
+
+    # Restore stdout/stderr and capture the logs
+    sys.stdout = original_stdout
+    sys.stderr = original_stderr
+
+    artifacts["modal_output_log"] = log_buffer.getvalue()
+    print(f"Captured {len(artifacts['modal_output_log'])} bytes of logs")
+
+    # Return error if logs_base didn't exist
+    if not logs_base.exists():
+        artifacts["error"] = f"Logs directory {logs_base} does not exist."
+
     return artifacts
 
 
@@ -326,7 +350,7 @@ def process_generation_result(repo_name: str, repo_id: str, results: dict) -> di
         if "traceback" in results:
             print(results["traceback"])
         return {"repo": repo_name, "repo_id": repo_id, "error": results["error"]}
-    
+
     # Parse result patches
     if "patches_json" not in results:
         print(f"Warning: No patches_json returned for {repo_name}")
@@ -339,27 +363,42 @@ def process_generation_result(repo_name: str, repo_id: str, results: dict) -> di
                 f.write(results["bug_gen_zip"])
             subprocess.run(["unzip", "-o", str(zip_path), "-d", str(local_bug_dir)], check=True)
             print(f"Bugs extracted to {local_bug_dir}")
+
+            # Save modal output log if available
+            if "modal_output_log" in results and results["modal_output_log"]:
+                log_path = local_bug_dir / "modal_output.log"
+                with open(log_path, "w") as f:
+                    f.write(results["modal_output_log"])
+                print(f"Modal output logs saved to {log_path}")
+
         return {"repo": repo_name, "repo_id": repo_id, "error": "No patches_json returned"}
-    
+
     patches = json.loads(results["patches_json"])
     if not patches:
         print(f"No bugs were generated for {repo_name}.")
         return {"repo": repo_name, "repo_id": repo_id, "patches": [], "total_bugs": 0}
-    
+
     # Save artifacts locally
     local_bug_dir = Path(f"logs/bug_gen/{repo_id}")
     local_bug_dir.mkdir(parents=True, exist_ok=True)
-    
+
     with open(local_bug_dir.parent / f"{repo_id}_all_patches.json", "w") as f:
         f.write(results["patches_json"])
-    
+
     if "bug_gen_zip" in results:
         zip_path = local_bug_dir / "bugs.zip"
         with open(zip_path, "wb") as f:
             f.write(results["bug_gen_zip"])
         subprocess.run(["unzip", "-o", str(zip_path), "-d", str(local_bug_dir)], check=True)
         os.remove(zip_path)
-    
+
+    # Save modal output log if available
+    if "modal_output_log" in results and results["modal_output_log"]:
+        log_path = local_bug_dir / "modal_output.log"
+        with open(log_path, "w") as f:
+            f.write(results["modal_output_log"])
+        print(f"Modal output logs saved to {log_path}")
+
     print(f"Generated {len(patches)} bugs for {repo_name}")
     return {
         "repo": repo_name,
