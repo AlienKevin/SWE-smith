@@ -1,23 +1,15 @@
 """
 Modal Bug Generation & Validation Script
+All logs are persisted to a Modal Volume.
 
-Supports two modes:
-1. Generation + Validation: Generate bugs remotely, then validate them
-2. Validate-only: Validate existing patches from local logs
-
-Both modes run pre-gold and post-gold tests in parallel across all repos.
+Run with: modal run scripts/bug_gen.py [OPTIONS]
 """
 
-import argparse
 import asyncio
 import json
 import logging
-import os
 import shutil
-import subprocess
 import sys
-import traceback
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import modal
@@ -121,6 +113,7 @@ def setup_asyncio_exception_logging():
 # ============================================================================
 
 APP_NAME = "swesmith-bug-gen"
+VOLUME_NAME = "swesmith-bug-gen"
 MINUTES = 60
 MODAL_TIMEOUT = 10 * MINUTES
 
@@ -209,6 +202,68 @@ def get_validator_image(image_name: str) -> modal.Image:
 
 
 app = modal.App(APP_NAME)
+# Use Volume v2 for better scalability (more files, concurrent writes, faster commits)
+logs_volume = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True, version=2)
+LOGS_MOUNT_PATH = "/logs"  # Where the volume is mounted in Modal containers
+
+
+# ============================================================================
+# Volume I/O Helpers
+# ============================================================================
+
+def volume_write_text(path: str, content: str) -> None:
+    """Write text content to a path on the Modal Volume."""
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+        f.write(content)
+        temp_path = f.name
+    # Upload after temp file is closed but still exists
+    with logs_volume.batch_upload() as batch:
+        batch.put_file(temp_path, path)
+    # Delete only after upload completes
+    Path(temp_path).unlink()
+
+
+def volume_write_bytes(path: str, content: bytes) -> None:
+    """Write binary content to a path on the Modal Volume."""
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode='wb', suffix='.bin', delete=False) as f:
+        f.write(content)
+        temp_path = f.name
+    # Upload after temp file is closed but still exists
+    with logs_volume.batch_upload() as batch:
+        batch.put_file(temp_path, path)
+    # Delete only after upload completes
+    Path(temp_path).unlink()
+
+
+def volume_read_text(path: str) -> str | None:
+    """Read text content from the Modal Volume. Returns None if file doesn't exist."""
+    try:
+        data = b"".join(logs_volume.read_file(path))
+        return data.decode("utf-8")
+    except Exception:
+        return None
+
+
+def volume_file_exists(path: str) -> bool:
+    """Check if a file exists on the Modal Volume."""
+    try:
+        # Try to read a small portion - if it fails, file doesn't exist
+        for _ in logs_volume.read_file(path):
+            return True
+        return True
+    except Exception:
+        return False
+
+
+def volume_list_dir(path: str) -> list[str]:
+    """List files/directories in a path on the Modal Volume."""
+    try:
+        entries = list(logs_volume.listdir(path))
+        return [e.path for e in entries]
+    except Exception:
+        return []
 
 
 # ============================================================================
@@ -219,12 +274,18 @@ app = modal.App(APP_NAME)
     image=generator_image,
     secrets=[modal.Secret.from_name("GITHUB_TOKEN")],
     timeout=MODAL_TIMEOUT,
+    volumes={LOGS_MOUNT_PATH: logs_volume},  # Mount volume for direct writes
 )
 def generate_bugs_remote(
     repo_name: str, max_bugs: int, interleave: bool,
-    max_entities: int, max_candidates: int, timeout_buffer_seconds: int = 15
+    max_entities: int, max_candidates: int, language: str,
+    timeout_buffer_seconds: int = 15
 ) -> dict:
-    """Generate bugs for a repository on a remote Modal worker."""
+    """Generate bugs for a repository on a remote Modal worker.
+    
+    Results are saved directly to the Modal Volume, reducing data transfer.
+    Returns only a lightweight summary.
+    """
     import sys
     from io import StringIO
 
@@ -238,7 +299,6 @@ def generate_bugs_remote(
     # Setup output capture
     log_buffer = StringIO()
     original_stdout, original_stderr = sys.stdout, sys.stderr
-    artifacts = {}
 
     class TeeWriter:
         def __init__(self, buffer, original):
@@ -266,6 +326,10 @@ def generate_bugs_remote(
     repo_id = resolve_repo_id()
     print(f"Resolved repo_id: {repo_id}")
     logs_base = Path("logs/bug_gen")
+    
+    # Volume paths for saving results
+    volume_base = Path(LOGS_MOUNT_PATH)
+    volume_bug_dir = volume_base / language / "bug_gen" / repo_id
 
     def _safe_execute(func, error_msg, *args, **kwargs):
         import traceback
@@ -276,39 +340,63 @@ def generate_bugs_remote(
             traceback.print_exc()
             return None
 
-    def collect_results():
+    def save_results_to_volume() -> dict:
+        """Collect results and save directly to Modal Volume. Returns summary."""
         if not logs_base.exists():
             print(f"LOGS BASE MISSING: {logs_base}")
-            return
+            return {"error": f"Logs directory {logs_base} does not exist."}
 
         generated_dirs = [d for d in logs_base.iterdir() if d.is_dir()]
         if not generated_dirs:
             print(f"NO DATA IN LOGS BASE. Files: {list(logs_base.glob('**/*'))}")
-            return
+            return {"error": "No data generated"}
 
         repo_id_actual = sorted(generated_dirs, key=lambda x: x.stat().st_mtime, reverse=True)[0].name
         print(f"Detected repo_id_actual: {repo_id_actual}")
 
         _safe_execute(collect_patches_main, "Error in collect_patches_main", str(logs_base / repo_id_actual))
 
-        # Zip and save
-        def _zip():
-            shutil.make_archive(f"/tmp/{repo_id_actual}", 'zip', str(logs_base / repo_id_actual))
-            with open(f"/tmp/{repo_id_actual}.zip", "rb") as f:
-                artifacts["bug_gen_zip"] = f.read()
-            print(f"Created bug_gen_zip: {len(artifacts['bug_gen_zip'])} bytes")
-        _safe_execute(_zip, "Error creating bug_gen_zip")
+        # Ensure volume directory exists
+        volume_bug_dir.mkdir(parents=True, exist_ok=True)
 
+        # Create and save zip
+        def _save_zip():
+            shutil.make_archive(f"/tmp/{repo_id_actual}", 'zip', str(logs_base / repo_id_actual))
+            zip_path = f"/tmp/{repo_id_actual}.zip"
+            dest_path = volume_bug_dir / "bugs.zip"
+            shutil.copy(zip_path, dest_path)
+            print(f"Saved bugs.zip to volume: {dest_path}")
+        _safe_execute(_save_zip, "Error saving zip to volume")
+
+        # Read and save patches
         patches_file = logs_base / f"{repo_id_actual}_all_patches.json"
         if patches_file.exists():
-            artifacts["patches_json"] = patches_file.read_text()
-            print(f"Read patches_json: {len(artifacts['patches_json'])} bytes")
+            patches_json = patches_file.read_text()
+            patches = json.loads(patches_json)
+            
+            # Save patches to volume
+            patches_dest = volume_base / language / "bug_gen" / f"{repo_id}_all_patches.json"
+            patches_dest.write_text(patches_json)
+            print(f"Saved {len(patches)} patches to volume: {patches_dest}")
+            
+            if not patches:
+                # Mark as done with 0 bugs
+                (volume_bug_dir / "done.txt").write_text("Generation completed: 0 bugs generated")
+                return {"total_bugs": 0, "patches": []}
+            
+            # Mark as done
+            (volume_bug_dir / "done.txt").write_text(f"Generation completed: {len(patches)} bugs generated")
+            return {"total_bugs": len(patches), "patches": patches}
         else:
             print(f"Patches file not found. Available: {[p.name for p in logs_base.iterdir()]}")
+            (volume_bug_dir / "error.txt").write_text("No patches_json generated")
+            return {"error": "No patches_json generated"}
 
     soft_timeout = MODAL_TIMEOUT - timeout_buffer_seconds
     print(f"Soft timeout: {soft_timeout}s")
 
+    result = {"repo": repo_name, "repo_id": repo_id}
+    
     try:
         generate_main(
             repo=repo_id, max_bugs=max_bugs, seed=24, interleave=interleave,
@@ -321,13 +409,33 @@ def generate_bugs_remote(
         traceback.print_exc()
     finally:
         sys.stdout, sys.stderr = original_stdout, original_stderr
-        print("\nCollecting partial results...")
-        _safe_execute(collect_results, "Error collecting results")
-        artifacts["modal_output_log"] = log_buffer.getvalue()
-        if not logs_base.exists():
-            artifacts["error"] = f"Logs directory {logs_base} does not exist."
+        print("\nCollecting and saving results to volume...")
+        
+        collection_result = _safe_execute(save_results_to_volume, "Error saving results")
+        if collection_result:
+            result.update(collection_result)
+        else:
+            result["error"] = "Failed to collect results"
+        
+        # Save log to volume
+        log_content = log_buffer.getvalue()
+        try:
+            volume_bug_dir.mkdir(parents=True, exist_ok=True)
+            (volume_bug_dir / "modal_output.log").write_text(log_content)
+        except Exception as e:
+            print(f"Failed to save log: {e}")
+        
+        # If there was an error, write error file
+        if "error" in result:
+            try:
+                (volume_bug_dir / "error.txt").write_text(f"Bug generation failed: {result['error']}")
+            except:
+                pass
+        
+        # Commit volume changes
+        logs_volume.commit()
 
-    return artifacts
+    return result
 
 
 # ============================================================================
@@ -392,103 +500,118 @@ async def run_validation_in_sandbox(
 
 
 # ============================================================================
-# Generation Phase
+# Generation Phase (using Modal .map() for true parallel processing)
 # ============================================================================
 
-def spawn_generation_task(repo_name: str, max_bugs: int, interleave: bool, max_entities: int, max_candidates: int):
-    """Spawn a generation task without blocking."""
-    try:
-        profile = resolve_profile(repo_name)
-        print(f"Spawning generation for {repo_name} (profile: {profile.__class__.__name__})...")
-        handle = generate_bugs_remote.spawn(
-            repo_name=repo_name, max_bugs=max_bugs, interleave=interleave,
-            max_entities=max_entities, max_candidates=max_candidates
-        )
-        return (repo_name, profile.repo_name, handle)
-    except Exception as e:
-        return (repo_name, None, {"repo": repo_name, "error": f"Failed to resolve profile: {e}"})
-
-
-def process_generation_result(repo_name: str, repo_id: str, results: dict) -> dict:
-    """Process results from a completed generation task."""
-    local_bug_dir = Path(f"logs/bug_gen/{repo_id}")
-    local_bug_dir.mkdir(parents=True, exist_ok=True)
-
-    # Save logs if available
-    if results.get("modal_output_log"):
-        (local_bug_dir / "modal_output.log").write_text(results["modal_output_log"], errors='replace')
-
-    if "error" in results:
-        print(f"Error during bug generation for {repo_name}: {results['error']}")
-        return {"repo": repo_name, "repo_id": repo_id, "error": results["error"]}
-
-    if "patches_json" not in results:
-        print(f"Warning: No patches_json returned for {repo_name}")
-        if "bug_gen_zip" in results:
-            zip_path = local_bug_dir / "bugs.zip"
-            zip_path.write_bytes(results["bug_gen_zip"])
-            subprocess.run(["unzip", "-o", str(zip_path), "-d", str(local_bug_dir)], check=True)
-        return {"repo": repo_name, "repo_id": repo_id, "error": "No patches_json returned"}
-
-    patches = json.loads(results["patches_json"])
-    if not patches:
-        print(f"No bugs generated for {repo_name}.")
-        return {"repo": repo_name, "repo_id": repo_id, "patches": [], "total_bugs": 0}
-
-    # Save patches
-    (local_bug_dir.parent / f"{repo_id}_all_patches.json").write_text(results["patches_json"])
-
-    if "bug_gen_zip" in results:
-        zip_path = local_bug_dir / "bugs.zip"
-        zip_path.write_bytes(results["bug_gen_zip"])
-        subprocess.run(["unzip", "-o", str(zip_path), "-d", str(local_bug_dir)], check=True)
-        zip_path.unlink()
-
-    print(f"Generated {len(patches)} bugs for {repo_name}")
-    return {"repo": repo_name, "repo_id": repo_id, "patches": patches, "total_bugs": len(patches)}
-
-
-def run_generation_phase(repos: list[str], args) -> list[dict]:
-    """Run bug generation for all repos in parallel."""
+def run_generation_phase(repos: list[str], args, language: str) -> list[dict]:
+    """Run bug generation for all repos in parallel using Modal .map().
+    
+    Uses Modal's .map() for true parallel processing with autoscaling workers.
+    Each worker saves results directly to the Volume, reducing data transfer.
+    Returns lightweight summaries.
+    """
     print(f"{'#'*60}")
     print(f"# PHASE 1: BUG GENERATION ({len(repos)} repos)")
     print(f"{'#'*60}\n")
 
-    spawn_results = [
-        spawn_generation_task(repo, args.max_bugs, args.interleave, args.max_entities, args.max_candidates)
-        for repo in repos
-    ]
-    print(f"Spawned {len(spawn_results)} generation tasks. Waiting for results...\n")
-
-    generation_results = []
-    for repo_name, repo_id, handle_or_error in spawn_results:
-        if isinstance(handle_or_error, dict):
-            generation_results.append(handle_or_error)
+    # Prepare inputs: resolve profiles and filter already-processed repos
+    repo_inputs = []  # List of (repo_name, repo_id) tuples for repos to process
+    skipped_done = 0
+    skipped_error = 0
+    failed_to_resolve = []  # Repos that failed profile resolution
+    
+    for repo in repos:
+        try:
+            profile = resolve_profile(repo)
+            repo_id = profile.repo_name
+        except Exception as e:
+            failed_to_resolve.append({"repo": repo, "repo_id": None, "error": f"Failed to resolve profile: {e}"})
+            continue
+            
+        volume_bug_dir = f"{language}/bug_gen/{repo_id}"
+        
+        # Check if already done or errored
+        if volume_file_exists(f"{volume_bug_dir}/done.txt"):
+            print(f"  Skipping {repo}: already completed")
+            skipped_done += 1
+        elif volume_file_exists(f"{volume_bug_dir}/error.txt"):
+            print(f"  Skipping {repo}: previously failed")
+            skipped_error += 1
+        elif volume_file_exists(f"{language}/bug_gen/{repo_id}_all_patches.json"):
+            print(f"  Skipping {repo}: patches already exist")
+            skipped_done += 1
         else:
-            try:
-                results = handle_or_error.get()
-                generation_results.append(process_generation_result(repo_name, repo_id, results))
-            except Exception as e:
-                generation_results.append({"repo": repo_name, "repo_id": repo_id, "error": f"Generation failed: {e}"})
+            repo_inputs.append((repo, repo_id))
+    
+    if skipped_done or skipped_error:
+        print(f"\nSkipped {skipped_done} completed, {skipped_error} failed repos\n")
+    
+    if not repo_inputs and not failed_to_resolve:
+        print("All repos already processed!\n")
+        return []
+
+    repo_names = [r[0] for r in repo_inputs]
+    
+    print(f"Running {len(repo_names)} generation tasks with Modal .map()...\n")
+    
+    # Use Modal .map() for true parallel processing with autoscaling
+    # Each worker saves results directly to Volume; we just collect summaries
+    generation_results = list(failed_to_resolve)  # Start with failed profile resolutions
+    
+    if repo_names:
+        completed = 0
+        total_bugs = 0
+        
+        for result_or_exc in generate_bugs_remote.map(
+            repo_names,
+            kwargs={
+                "max_bugs": args.max_bugs,
+                "interleave": args.interleave,
+                "max_entities": args.max_entities,
+                "max_candidates": args.max_candidates,
+                "language": language,  # Workers save directly to Volume
+            },
+            return_exceptions=True,
+        ):
+            completed += 1
+            
+            if isinstance(result_or_exc, Exception):
+                # Worker crashed - result already includes repo info from the exception context
+                generation_results.append({"error": f"Worker exception: {result_or_exc}"})
+                print(f"  [{completed}/{len(repo_names)}] ERROR: {result_or_exc}")
+            else:
+                # Result is a dict with repo, repo_id, total_bugs/patches/error
+                generation_results.append(result_or_exc)
+                repo = result_or_exc.get("repo", "unknown")
+                if "error" in result_or_exc:
+                    print(f"  [{completed}/{len(repo_names)}] {repo}: ERROR - {result_or_exc['error'][:50]}")
+                else:
+                    bugs = result_or_exc.get("total_bugs", 0)
+                    total_bugs += bugs
+                    print(f"  [{completed}/{len(repo_names)}] {repo}: {bugs} bugs generated")
+        
+        print(f"\nGeneration complete: {total_bugs} total bugs from {len(repo_names)} repos\n")
 
     return generation_results
+
 
 
 # ============================================================================
 # Validation Phase
 # ============================================================================
 
-def annotate_patches(patches: list, repo: str, repo_id: str, profile) -> list:
+def annotate_patches(patches: list, repo: str, repo_id: str, profile, language: str) -> list:
     """Add metadata to patches for validation."""
     for p in patches:
         p["_repo"] = repo
         p["_repo_id"] = repo_id
         p["_profile"] = profile
+        p["_language"] = language
     return patches
 
 
-def collect_patches_from_files(repos: list[str]) -> list[dict]:
-    """Collect patches from local files for validate-only mode."""
+def collect_patches_from_files(repos: list[str], language: str) -> list[dict]:
+    """Collect patches from Modal Volume for validate-only mode."""
     all_patches = []
     for repo in repos:
         try:
@@ -498,17 +621,18 @@ def collect_patches_from_files(repos: list[str]) -> list[dict]:
             continue
 
         repo_id = profile.repo_name
-        patches_file = Path(f"logs/bug_gen/{repo_id}_all_patches.json")
-        if patches_file.exists():
-            patches = json.loads(patches_file.read_text())
-            all_patches.extend(annotate_patches(patches, repo, repo_id, profile))
+        patches_path = f"{language}/bug_gen/{repo_id}_all_patches.json"
+        patches_json = volume_read_text(patches_path)
+        if patches_json:
+            patches = json.loads(patches_json)
+            all_patches.extend(annotate_patches(patches, repo, repo_id, profile, language))
             print(f"  {repo}: {len(patches)} patches")
         else:
             print(f"  Skipping {repo}: no patches file")
     return all_patches
 
 
-def collect_patches_from_generation(generation_results: list[dict]) -> tuple[list[dict], list[dict]]:
+def collect_patches_from_generation(generation_results: list[dict], language: str) -> tuple[list[dict], list[dict]]:
     """Collect patches from generation results, separating errors."""
     all_patches, errors = [], []
     for gen_result in generation_results:
@@ -518,7 +642,7 @@ def collect_patches_from_generation(generation_results: list[dict]) -> tuple[lis
         patches = gen_result.get("patches", [])
         if patches:
             profile = resolve_profile(gen_result["repo"])
-            all_patches.extend(annotate_patches(patches, gen_result["repo"], gen_result["repo_id"], profile))
+            all_patches.extend(annotate_patches(patches, gen_result["repo"], gen_result["repo_id"], profile, language))
     return all_patches, errors
 
 
@@ -528,35 +652,52 @@ def build_repos_with_patches(all_patches: list) -> dict:
     for p in all_patches:
         repo = p["_repo"]
         if repo not in repos:
-            repos[repo] = {"profile": p["_profile"], "repo_id": p["_repo_id"]}
+            repos[repo] = {"profile": p["_profile"], "repo_id": p["_repo_id"], "language": p["_language"]}
     return repos
 
 
 def process_postgold_result(task: dict, result: dict, get_valid_report) -> dict:
-    """Process a single post-gold test result."""
+    """Process a single post-gold test result and save to Modal Volume."""
+    import tempfile
+    
     instance_id, repo, repo_id = task["instance_id"], task["repo"], task["repo_id"]
+    language = task["full_patch"]["_language"]
+    volume_log_dir = f"{language}/run_validation/{repo_id}/{instance_id}"
     
     if "error" in result:
         return {"instance_id": instance_id, "repo": repo, "error": result["error"], "valid": False}
     
-    # Save output
-    inst_log_dir = Path(f"logs/run_validation/{repo_id}/{instance_id}")
-    inst_log_dir.mkdir(parents=True, exist_ok=True)
-    (inst_log_dir / "test_output.txt").write_text(result["output"], errors='replace')
+    # Save output to volume
+    volume_write_text(f"{volume_log_dir}/test_output.txt", result["output"])
     
-    # Check baseline
-    baseline_path = f"logs/run_validation/{repo_id}/{repo_id}.ref/test_output.txt"
-    if not os.path.exists(baseline_path):
-        return {"instance_id": instance_id, "repo": repo, "error": f"Baseline not found", "valid": False}
+    # Check baseline exists
+    baseline_path = f"{language}/run_validation/{repo_id}/{repo_id}.ref/test_output.txt"
+    baseline_content = volume_read_text(baseline_path)
+    if not baseline_content:
+        return {"instance_id": instance_id, "repo": repo, "error": "Baseline not found", "valid": False}
     
-    # Grade
+    # Grade using temp files (get_valid_report requires file paths)
     try:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f_pre:
+            f_pre.write(baseline_content)
+            pre_path = f_pre.name
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f_post:
+            f_post.write(result["output"])
+            post_path = f_post.name
+        
         report = get_valid_report(
-            val_pregold_path=baseline_path,
-            val_postgold_path=str(inst_log_dir / "test_output.txt"),
+            val_pregold_path=pre_path,
+            val_postgold_path=post_path,
             instance=task["full_patch"]
         )
-        (inst_log_dir / "report.json").write_text(json.dumps(report, indent=4))
+        
+        # Cleanup temp files
+        Path(pre_path).unlink()
+        Path(post_path).unlink()
+        
+        # Save report to volume
+        volume_write_text(f"{volume_log_dir}/report.json", json.dumps(report, indent=4))
+        
         is_valid = len(report.get("PASS_TO_FAIL", [])) > 0
         return {"instance_id": instance_id, "repo": repo, "valid": is_valid}
     except Exception as e:
@@ -565,6 +706,7 @@ def process_postgold_result(task: dict, result: dict, get_valid_report) -> dict:
 
 async def run_pregold_phase_async(repos_with_patches: dict, max_concurrent: int, env_name: str) -> set[str]:
     """Run all pre-gold (baseline) tests asynchronously. Returns set of repos with 0 passing tests (to skip)."""
+    import tempfile
     from swesmith.harness.grading import read_test_output
     from swebench.harness.constants import TestStatus
     
@@ -575,9 +717,11 @@ async def run_pregold_phase_async(repos_with_patches: dict, max_concurrent: int,
     previously_failed = set()  # Repos that failed in previous runs
     
     for repo, info in repos_with_patches.items():
-        baseline_dir = Path(f"logs/run_validation/{info['repo_id']}/{info['repo_id']}.ref")
-        test_output_exists = (baseline_dir / "test_output.txt").exists()
-        error_exists = (baseline_dir / "error.txt").exists()
+        lang = info["language"]
+        baseline_output_path = f"{lang}/run_validation/{info['repo_id']}/{info['repo_id']}.ref/test_output.txt"
+        error_path = f"{lang}/run_validation/{info['repo_id']}/{info['repo_id']}.ref/error.txt"
+        test_output_exists = volume_file_exists(baseline_output_path)
+        error_exists = volume_file_exists(error_path)
         
         if test_output_exists and not error_exists:
             print(f"  Skipping {repo}: baseline exists")
@@ -587,7 +731,8 @@ async def run_pregold_phase_async(repos_with_patches: dict, max_concurrent: int,
         else:
             tasks.append({
                 "repo": repo, "repo_id": info["repo_id"], "profile": info["profile"],
-                "instance_id": f"{info['repo_id']}.ref", "workdir": f"/{env_name}"
+                "instance_id": f"{info['repo_id']}.ref", "workdir": f"/{env_name}",
+                "language": lang
             })
     
     if not tasks:
@@ -622,25 +767,29 @@ async def run_pregold_phase_async(repos_with_patches: dict, max_concurrent: int,
         task, result = await coro
         completed += 1
         
+        lang = task["language"]
+        volume_baseline_dir = f"{lang}/run_validation/{task['repo_id']}/{task['instance_id']}"
+        
         try:
-            baseline_dir = Path(f"logs/run_validation/{task['repo_id']}/{task['instance_id']}")
-            baseline_dir.mkdir(parents=True, exist_ok=True)
-            
             if "error" not in result:
-                output_path = baseline_dir / "test_output.txt"
-                output_path.write_text(result["output"], errors='replace')
+                # Save output to volume
+                volume_write_text(f"{volume_baseline_dir}/test_output.txt", result["output"])
                 
-                # Validate baseline has at least 1 passing test
+                # Validate baseline has at least 1 passing test (use temp file for parsing)
                 try:
-                    test_output, found = read_test_output(str(output_path))
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                        f.write(result["output"])
+                        temp_path = f.name
+                    test_output, found = read_test_output(temp_path)
+                    Path(temp_path).unlink()
+                    
                     if found and test_output:
                         status_map = task["profile"].log_parser(test_output)
                         passed = sum(1 for s in status_map.values() if s == TestStatus.PASSED.value)
                         if passed == 0:
                             status = f"⚠️ 0 tests passed (skipping post-gold)"
                             failed_repos.add(task["repo"])
-                            # Write error file so this repo is skipped next time
-                            (baseline_dir / "error.txt").write_text(f"Pre-gold failed: 0 tests passed")
+                            volume_write_text(f"{volume_baseline_dir}/error.txt", "Pre-gold failed: 0 tests passed")
                         else:
                             status = f"OK ({passed} tests passed)"
                     else:
@@ -658,23 +807,18 @@ async def run_pregold_phase_async(repos_with_patches: dict, max_concurrent: int,
                             reason = "unknown"
                         status = f"⚠️ {reason} (skipping post-gold)"
                         failed_repos.add(task["repo"])
-                        # Write error file so this repo is skipped next time
-                        (baseline_dir / "error.txt").write_text(f"Pre-gold failed: {reason}")
+                        volume_write_text(f"{volume_baseline_dir}/error.txt", f"Pre-gold failed: {reason}")
                 except Exception as e:
                     status = f"OK (parse check failed: {e})"
             else:
                 status = f"ERROR: {result['error'][:50]}"
                 failed_repos.add(task["repo"])
-                # Write error file so this repo is skipped next time
-                (baseline_dir / "error.txt").write_text(f"Pre-gold sandbox error: {result['error']}")
+                volume_write_text(f"{volume_baseline_dir}/error.txt", f"Pre-gold sandbox error: {result['error']}")
         except Exception as e:
             status = f"EXCEPTION: {e}"
             failed_repos.add(task["repo"])
-            # Try to write error file
             try:
-                baseline_dir = Path(f"logs/run_validation/{task['repo_id']}/{task['instance_id']}")
-                baseline_dir.mkdir(parents=True, exist_ok=True)
-                (baseline_dir / "error.txt").write_text(f"Pre-gold exception: {e}")
+                volume_write_text(f"{volume_baseline_dir}/error.txt", f"Pre-gold exception: {e}")
             except:
                 pass
         print(f"  [{completed}/{len(tasks)}] {task['repo']}: {status}")
@@ -710,7 +854,7 @@ async def run_postgold_phase_async(all_patches: list, max_concurrent: int, env_n
          "instance_id": p["instance_id"], "patch": p["patch"],
          "workdir": f"/{env_name}", "full_patch": p}
         for p in all_patches
-        if not Path(f"logs/run_validation/{p['_repo_id']}/{p['instance_id']}/report.json").exists()
+        if not volume_file_exists(f"{p['_language']}/run_validation/{p['_repo_id']}/{p['instance_id']}/report.json")
     ]
     
     print(f"  {len(all_patches) - len(tasks)} already validated, {len(tasks)} remaining")
@@ -836,73 +980,86 @@ def print_summary(results: list[dict], repos_count: int):
 # CLI & Main
 # ============================================================================
 
-def parse_args():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Modal Bug Generation & Validation")
-    parser.add_argument("--repos", nargs="*", help="Repository names (owner/repo)")
-    parser.add_argument("--language", default="javascript", help="Language (default: javascript)")
-    parser.add_argument("--max-bugs", type=int, default=200, help="Max bugs per modifier")
-    parser.add_argument("--interleave", action="store_true", help="Interleave modifiers")
-    parser.add_argument("--max-entities", type=int, default=2000, help="Max entities to sample (-1 for all)")
-    parser.add_argument("--max-candidates", type=int, default=2000, help="Max candidates to process (-1 for all)")
-    parser.add_argument("--validate-only", action="store_true", help="Only validate existing patches")
-    parser.add_argument("--max-concurrent-tests", type=int, default=900, help="Max concurrent tests (default: 900)")
-    return parser.parse_args()
-
-
-def main():
-    args = parse_args()
+@app.local_entrypoint()
+def main(
+    repos: str = "",
+    language: str = "javascript",
+    max_bugs: int = 200,
+    interleave: bool = False,
+    max_entities: int = 2000,
+    max_candidates: int = 2000,
+    max_concurrent_tests: int = 900,
+):
+    """
+    Modal Bug Generation & Validation script.
+    
+    Runs two phases:
+    1. Generation: Creates bugs for repos (skips repos that are already done/failed)
+    2. Validation: Validates all patches from the volume
+    
+    Run with: modal run scripts/bug_gen.py [OPTIONS]
+    
+    Arguments:
+        repos: Comma-separated repository names (owner/repo), or empty to use all for language
+        language: Language to process (default: javascript)
+        max_bugs: Max bugs per modifier (default: 200)
+        interleave: Interleave modifiers (default: False)
+        max_entities: Max entities to sample, -1 for all (default: 2000)
+        max_candidates: Max candidates to process, -1 for all (default: 2000)
+        max_concurrent_tests: Max concurrent tests (default: 900)
+    """
+    from swesmith.constants import ENV_NAME
+    
+    # Parse repos (comma-separated string to list)
+    repo_list = [r.strip() for r in repos.split(",") if r.strip()] if repos else []
     
     # Determine repos
-    if args.repos:
-        repos = args.repos
+    if repo_list:
+        target_repos = repo_list
     else:
-        repos = get_repos_for_language(args.language)
-        print(f"Found {len(repos)} repos for '{args.language}':")
-        for r in repos:
+        target_repos = get_repos_for_language(language)
+        print(f"Found {len(target_repos)} repos for '{language}':")
+        for r in target_repos:
             print(f"  - {r}")
     
-    if not repos:
-        print(f"No repos found for language: {args.language}")
-        exit(1)
+    if not target_repos:
+        print(f"No repos found for language: {language}")
+        return
     
     print(f"\n{'='*60}")
-    print(f"BUG GEN - {len(repos)} repos, {args.max_concurrent_tests} max concurrent")
+    print(f"BUG GEN - {len(target_repos)} repos, {max_concurrent_tests} max concurrent")
+    print(f"Volume: {VOLUME_NAME}/{language}/")
     print(f"{'='*60}\n")
     
-    with app.run():
-        from swesmith.constants import ENV_NAME
-        
-        if args.validate_only:
-            print("MODE: Validation only\n")
-            print("Collecting patches...")
-            all_patches = collect_patches_from_files(repos)
-            print(f"\nTotal: {len(all_patches)} patches\n")
-            
-            results = run_validation_phase(all_patches, args.max_concurrent_tests, ENV_NAME)
-            if results:
-                print_summary(results, len(build_repos_with_patches(all_patches)))
-        
-        else:
-            print("MODE: Generation + Validation\n")
-            
-            generation_results = run_generation_phase(repos, args)
-            
-            print(f"\n{'#'*60}")
-            print(f"# PHASE 2: VALIDATION")
-            print(f"{'#'*60}\n")
-            
-            all_patches, errors = collect_patches_from_generation(generation_results)
-            results = run_validation_phase(all_patches, args.max_concurrent_tests, ENV_NAME)
-            
-            if results:
-                print_summary(results, len(build_repos_with_patches(all_patches)))
-            
-            if errors:
-                print(f"\nGeneration Errors ({len(errors)}):")
-                for err in errors:
-                    print(f"  - {err['repo']}: {err.get('error', 'Unknown')}")
-
-
-if __name__ == "__main__":
-    main()
+    # Create a simple args-like object for compatibility
+    class Args:
+        pass
+    args = Args()
+    args.max_bugs = max_bugs
+    args.interleave = interleave
+    args.max_entities = max_entities
+    args.max_candidates = max_candidates
+    
+    # Phase 1: Generation (skips repos that are already done/failed)
+    generation_results = run_generation_phase(target_repos, args, language)
+    
+    # Phase 2: Validation - collect ALL patches from volume (not just from this run)
+    print(f"\n{'#'*60}")
+    print(f"# PHASE 2: VALIDATION")
+    print(f"{'#'*60}\n")
+    
+    print("Collecting patches from volume...")
+    all_patches = collect_patches_from_files(target_repos, language)
+    print(f"Total: {len(all_patches)} patches\n")
+    
+    results = run_validation_phase(all_patches, max_concurrent_tests, ENV_NAME)
+    
+    if results:
+        print_summary(results, len(build_repos_with_patches(all_patches)))
+    
+    # Report generation errors from this run
+    errors = [r for r in generation_results if "error" in r]
+    if errors:
+        print(f"\nGeneration Errors ({len(errors)}):")
+        for err in errors:
+            print(f"  - {err['repo']}: {err.get('error', 'Unknown')}")
