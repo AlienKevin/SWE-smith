@@ -9,6 +9,7 @@ Both modes run pre-gold and post-gold tests in parallel across all repos.
 """
 
 import argparse
+import asyncio
 import json
 import os
 import shutil
@@ -236,52 +237,62 @@ def generate_bugs_remote(
 # ============================================================================
 # Validation Sandbox
 # ============================================================================
-
-def run_validation_in_sandbox(
-    app: modal.App, image_name: str, instance_id: str,
-    test_cmd: str, workdir: str, patch: str | None = None, timeout: int = 300
+async def run_validation_in_sandbox(
+    semaphore: asyncio.Semaphore, app: modal.App, image_name: str, instance_id: str,
+    test_cmd: str, workdir: str, patch: str | None, timeout: int
 ) -> dict:
-    """Run validation in a Modal Sandbox with a specific Docker image."""
-    validator_image = get_validator_image(image_name)
+    """
+    Run validation in a Modal Sandbox with a specific Docker image.
     
-    script_lines = [
-        "#!/bin/bash", "exec 2>&1", "set -uxo pipefail",
-        f"cd {workdir}", "git checkout .",
-    ]
+    Uses Modal's native async APIs:
+    - Sandbox.create.aio() - async sandbox creation
+    - process.stdout.read.aio() - async output reading  
+    - process.wait.aio() - async wait for completion
+    - sb.terminate.aio() - async cleanup
     
-    if patch:
-        script_lines.extend([
-            f"cat > /tmp/{instance_id}.diff << 'PATCH_EOF'",
-            patch, "PATCH_EOF",
-            f"git apply /tmp/{instance_id}.diff",
-        ])
-    
-    script_lines.extend([
-        f": '{TEST_OUTPUT_START}'",
-        f"{test_cmd} || true",
-        f": '{TEST_OUTPUT_END}'",
-    ])
-    
-    try:
-        sb = modal.Sandbox.create(app=app, image=validator_image, timeout=timeout)
-        process = sb.exec("bash", "-c", "\n".join(script_lines))
-        try:
-            output_raw = process.stdout.read()
-        except UnicodeDecodeError as e:
-            # Modal's stdout.read() failed to decode - sandbox output has binary data
-            return {"instance_id": instance_id, "error": f"Binary output (decode failed at pos {e.start})"}
-        exit_code = process.wait()
-        sb.terminate()
+    This is pure async I/O with zero thread overhead.
+    """
+    async with semaphore:
+        validator_image = get_validator_image(image_name)
         
-        output = output_raw.decode("utf-8", errors="replace") if isinstance(output_raw, bytes) else output_raw
-        return {"instance_id": instance_id, "output": output, "exit_code": exit_code}
-    except UnicodeDecodeError as e:
-        return {"instance_id": instance_id, "error": f"Binary output (decode failed at pos {e.start})"}
-    except Exception as e:
-        err_str = str(e)
-        if "timeout" in err_str.lower() or "SandboxTimeoutError" in err_str:
-            return {"instance_id": instance_id, "error": f"Timeout ({timeout}s)"}
-        return {"instance_id": instance_id, "error": err_str}
+        script_lines = [
+            "#!/bin/bash", "exec 2>&1", "set -uxo pipefail",
+            f"cd {workdir}", "git checkout .",
+        ]
+        
+        if patch:
+            script_lines.extend([
+                f"cat > /tmp/{instance_id}.diff << 'PATCH_EOF'",
+                patch, "PATCH_EOF",
+                f"git apply /tmp/{instance_id}.diff",
+            ])
+        
+        script_lines.extend([
+            f": '{TEST_OUTPUT_START}'",
+            f"{test_cmd} || true",
+            f": '{TEST_OUTPUT_END}'",
+        ])
+        
+        try:
+            # Use Modal's native async APIs
+            sb = await modal.Sandbox.create.aio(app=app, image=validator_image, timeout=timeout)
+            process = await sb.exec.aio("bash", "-c", "\n".join(script_lines))
+            try:
+                output_raw = await process.stdout.read.aio()
+            except UnicodeDecodeError as e:
+                return {"instance_id": instance_id, "error": f"Binary output (decode failed at pos {e.start})"}
+            exit_code = await process.wait.aio()
+            await sb.terminate.aio()
+            
+            output = output_raw.decode("utf-8", errors="replace") if isinstance(output_raw, bytes) else output_raw
+            return {"instance_id": instance_id, "output": output, "exit_code": exit_code}
+        except UnicodeDecodeError as e:
+            return {"instance_id": instance_id, "error": f"Binary output (decode failed at pos {e.start})"}
+        except Exception as e:
+            err_str = str(e)
+            if "timeout" in err_str.lower() or "SandboxTimeoutError" in err_str:
+                return {"instance_id": instance_id, "error": f"Timeout ({timeout}s)"}
+            return {"instance_id": instance_id, "error": err_str}
 
 
 # ============================================================================
@@ -456,88 +467,116 @@ def process_postgold_result(task: dict, result: dict, get_valid_report) -> dict:
         return {"instance_id": instance_id, "repo": repo, "error": f"Grading error: {e}", "valid": False}
 
 
-def run_pregold_phase(repos_with_patches: dict, max_concurrent: int, env_name: str) -> set[str]:
-    """Run all pre-gold (baseline) tests. Returns set of repos with 0 passing tests (to skip)."""
+async def run_pregold_phase_async(repos_with_patches: dict, max_concurrent: int, env_name: str) -> set[str]:
+    """Run all pre-gold (baseline) tests asynchronously. Returns set of repos with 0 passing tests (to skip)."""
     from swesmith.harness.grading import read_test_output
     from swebench.harness.constants import TestStatus
     
     print(f"\nPHASE: PRE-GOLD (BASELINE) TESTS")
     print(f"Running {len(repos_with_patches)} baselines, max concurrent: {max_concurrent}")
     
-    tasks = [
-        {"repo": repo, "repo_id": info["repo_id"], "profile": info["profile"],
-         "instance_id": f"{info['repo_id']}.ref", "workdir": f"/{env_name}"}
-        for repo, info in repos_with_patches.items()
-        if not Path(f"logs/run_validation/{info['repo_id']}/{info['repo_id']}.ref/test_output.txt").exists()
-    ]
+    tasks = []
+    previously_failed = set()  # Repos that failed in previous runs
     
-    for repo in repos_with_patches:
-        if not any(t["repo"] == repo for t in tasks):
+    for repo, info in repos_with_patches.items():
+        baseline_dir = Path(f"logs/run_validation/{info['repo_id']}/{info['repo_id']}.ref")
+        test_output_exists = (baseline_dir / "test_output.txt").exists()
+        error_exists = (baseline_dir / "error.txt").exists()
+        
+        if test_output_exists and not error_exists:
             print(f"  Skipping {repo}: baseline exists")
+        elif error_exists:
+            print(f"  Skipping {repo}: previously failed")
+            previously_failed.add(repo)
+        else:
+            tasks.append({
+                "repo": repo, "repo_id": info["repo_id"], "profile": info["profile"],
+                "instance_id": f"{info['repo_id']}.ref", "workdir": f"/{env_name}"
+            })
     
     if not tasks:
-        print("  All baselines already exist!\n")
-        return set()
+        print("  All baselines already exist!\\n")
+        return previously_failed  # Return previously failed repos to skip in post-gold
     
+    # Semaphore controls max concurrent operations
+    semaphore = asyncio.Semaphore(max_concurrent)
+    failed_repos = previously_failed.copy()  # Start with previously failed repos
+    
+    async def process_baseline(task: dict) -> tuple[dict, dict]:
+        """Process a single baseline test."""
+        result = await run_validation_in_sandbox(
+            semaphore=semaphore, app=app,
+            image_name=task["profile"].image_name, instance_id=task["instance_id"],
+            test_cmd=task["profile"].test_cmd, workdir=task["workdir"],
+            patch=None, timeout=PREGOLD_TIMEOUT
+        )
+        return (task, result)
+    
+    # Create all async tasks
+    async_tasks = [process_baseline(t) for t in tasks]
+    
+    # Process results as they complete
     completed = 0
-    failed_repos = set()  # Repos with 0 passing tests
-    
-    with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
-        future_to_task = {
-            executor.submit(
-                run_validation_in_sandbox, app=app,
-                image_name=t["profile"].image_name, instance_id=t["instance_id"],
-                test_cmd=t["profile"].test_cmd, workdir=t["workdir"],
-                patch=None, timeout=PREGOLD_TIMEOUT
-            ): t for t in tasks
-        }
+    for coro in asyncio.as_completed(async_tasks):
+        task, result = await coro
+        completed += 1
         
-        for future in as_completed(future_to_task):
-            task = future_to_task[future]
-            completed += 1
-            try:
-                result = future.result()
-                if "error" not in result:
-                    baseline_dir = Path(f"logs/run_validation/{task['repo_id']}/{task['instance_id']}")
-                    baseline_dir.mkdir(parents=True, exist_ok=True)
-                    output_path = baseline_dir / "test_output.txt"
-                    output_path.write_text(result["output"], errors='replace')
-                    
-                    # Validate baseline has at least 1 passing test
-                    try:
-                        test_output, found = read_test_output(str(output_path))
-                        if found and test_output:
-                            status_map = task["profile"].log_parser(test_output)
-                            passed = sum(1 for s in status_map.values() if s == TestStatus.PASSED.value)
-                            if passed == 0:
-                                status = f"⚠️ 0 tests passed (skipping post-gold)"
-                                failed_repos.add(task["repo"])
-                            else:
-                                status = f"OK ({passed} tests passed)"
-                        else:
-                            # Diagnose why test output wasn't found
-                            raw_output = result["output"]
-                            if "APPLY_PATCH_FAIL" in raw_output or "error: patch failed" in raw_output:
-                                reason = "patch apply failed"
-                            elif TEST_OUTPUT_START not in raw_output:
-                                reason = "test command crashed before start marker"
-                            elif TEST_OUTPUT_END not in raw_output:
-                                reason = "tests never completed (no end marker)"
-                            elif not test_output:
-                                reason = "no test output between markers"
-                            else:
-                                reason = "unknown"
-                            status = f"⚠️ {reason} (skipping post-gold)"
+        try:
+            baseline_dir = Path(f"logs/run_validation/{task['repo_id']}/{task['instance_id']}")
+            baseline_dir.mkdir(parents=True, exist_ok=True)
+            
+            if "error" not in result:
+                output_path = baseline_dir / "test_output.txt"
+                output_path.write_text(result["output"], errors='replace')
+                
+                # Validate baseline has at least 1 passing test
+                try:
+                    test_output, found = read_test_output(str(output_path))
+                    if found and test_output:
+                        status_map = task["profile"].log_parser(test_output)
+                        passed = sum(1 for s in status_map.values() if s == TestStatus.PASSED.value)
+                        if passed == 0:
+                            status = f"⚠️ 0 tests passed (skipping post-gold)"
                             failed_repos.add(task["repo"])
-                    except Exception as e:
-                        status = f"OK (parse check failed: {e})"
-                else:
-                    status = f"ERROR: {result['error'][:50]}"
-                    failed_repos.add(task["repo"])
-            except Exception as e:
-                status = f"EXCEPTION: {e}"
+                            # Write error file so this repo is skipped next time
+                            (baseline_dir / "error.txt").write_text(f"Pre-gold failed: 0 tests passed")
+                        else:
+                            status = f"OK ({passed} tests passed)"
+                    else:
+                        # Diagnose why test output wasn't found
+                        raw_output = result["output"]
+                        if "APPLY_PATCH_FAIL" in raw_output or "error: patch failed" in raw_output:
+                            reason = "patch apply failed"
+                        elif TEST_OUTPUT_START not in raw_output:
+                            reason = "test command crashed before start marker"
+                        elif TEST_OUTPUT_END not in raw_output:
+                            reason = "tests never completed (no end marker)"
+                        elif not test_output:
+                            reason = "no test output between markers"
+                        else:
+                            reason = "unknown"
+                        status = f"⚠️ {reason} (skipping post-gold)"
+                        failed_repos.add(task["repo"])
+                        # Write error file so this repo is skipped next time
+                        (baseline_dir / "error.txt").write_text(f"Pre-gold failed: {reason}")
+                except Exception as e:
+                    status = f"OK (parse check failed: {e})"
+            else:
+                status = f"ERROR: {result['error'][:50]}"
                 failed_repos.add(task["repo"])
-            print(f"  [{completed}/{len(tasks)}] {task['repo']}: {status}")
+                # Write error file so this repo is skipped next time
+                (baseline_dir / "error.txt").write_text(f"Pre-gold sandbox error: {result['error']}")
+        except Exception as e:
+            status = f"EXCEPTION: {e}"
+            failed_repos.add(task["repo"])
+            # Try to write error file
+            try:
+                baseline_dir = Path(f"logs/run_validation/{task['repo_id']}/{task['instance_id']}")
+                baseline_dir.mkdir(parents=True, exist_ok=True)
+                (baseline_dir / "error.txt").write_text(f"Pre-gold exception: {e}")
+            except:
+                pass
+        print(f"  [{completed}/{len(tasks)}] {task['repo']}: {status}")
     
     print(f"Pre-gold complete: {completed} baselines")
     if failed_repos:
@@ -546,8 +585,20 @@ def run_pregold_phase(repos_with_patches: dict, max_concurrent: int, env_name: s
     return failed_repos
 
 
-def run_postgold_phase(all_patches: list, max_concurrent: int, env_name: str) -> list[dict]:
-    """Run all post-gold tests."""
+def run_pregold_phase(repos_with_patches: dict, max_concurrent: int, env_name: str) -> set[str]:
+    """Sync wrapper for the async pre-gold phase."""
+    return asyncio.run(run_pregold_phase_async(repos_with_patches, max_concurrent, env_name))
+
+
+async def run_postgold_phase_async(all_patches: list, max_concurrent: int, env_name: str) -> list[dict]:
+    """
+    Run all post-gold tests using asyncio for efficient concurrent I/O.
+    
+    Uses asyncio.Semaphore to limit concurrency instead of ThreadPoolExecutor.
+    This is much more efficient for I/O-bound operations like Modal API calls:
+    - ThreadPoolExecutor with 1000 workers = 1000 threads = high memory/CPU overhead
+    - asyncio with semaphore = 1 thread + event loop = minimal overhead
+    """
     from swesmith.harness.grading import get_valid_report
     
     print(f"PHASE: POST-GOLD TESTS")
@@ -567,34 +618,50 @@ def run_postgold_phase(all_patches: list, max_concurrent: int, env_name: str) ->
         print("  All patches already validated!")
         return []
     
-    results, completed, valid_count = [], 0, 0
+    # Semaphore controls max concurrent operations
+    semaphore = asyncio.Semaphore(max_concurrent)
     
-    with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
-        future_to_task = {
-            executor.submit(
-                run_validation_in_sandbox, app=app,
-                image_name=t["profile"].image_name, instance_id=t["instance_id"],
-                test_cmd=t["profile"].test_cmd, workdir=t["workdir"],
-                patch=t["patch"], timeout=t["profile"].timeout
-            ): t for t in tasks
-        }
+    async def process_single_task(task: dict) -> dict:
+        """Process a single validation task."""
+        result = await run_validation_in_sandbox(
+            semaphore=semaphore, app=app,
+            image_name=task["profile"].image_name, instance_id=task["instance_id"],
+            test_cmd=task["profile"].test_cmd, workdir=task["workdir"],
+            patch=task["patch"], timeout=task["profile"].timeout
+        )
+        return (task, result)
+    
+    # Create all async tasks
+    async_tasks = [process_single_task(t) for t in tasks]
+    
+    # Track progress
+    results = []
+    completed = 0
+    valid_count = 0
+    
+    # Process results as they complete
+    for coro in asyncio.as_completed(async_tasks):
+        task, result = await coro
+        completed += 1
         
-        for future in as_completed(future_to_task):
-            task = future_to_task[future]
-            completed += 1
-            try:
-                processed = process_postgold_result(task, future.result(), get_valid_report)
-            except Exception as e:
-                processed = {"instance_id": task["instance_id"], "repo": task["repo"], "error": str(e), "valid": False}
-            
-            results.append(processed)
-            if processed.get("valid"):
-                valid_count += 1
-            if completed % 10 == 0 or completed == len(tasks):
-                print(f"  Progress: {completed}/{len(tasks)} tests, {valid_count} valid bugs")
+        try:
+            processed = process_postgold_result(task, result, get_valid_report)
+        except Exception as e:
+            processed = {"instance_id": task["instance_id"], "repo": task["repo"], "error": str(e), "valid": False}
+        
+        results.append(processed)
+        if processed.get("valid"):
+            valid_count += 1
+        if completed % 100 == 0 or completed == len(tasks):
+            print(f"  Progress: {completed}/{len(tasks)} tests, {valid_count} valid bugs")
     
     print(f"Post-gold complete: {valid_count}/{len(tasks)} valid bugs\n")
     return results
+
+
+def run_postgold_phase(all_patches: list, max_concurrent: int, env_name: str) -> list[dict]:
+    """Sync wrapper for the async post-gold phase."""
+    return asyncio.run(run_postgold_phase_async(all_patches, max_concurrent, env_name))
 
 
 def run_validation_phase(all_patches: list, max_concurrent: int, env_name: str) -> list[dict]:
