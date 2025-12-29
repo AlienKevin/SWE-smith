@@ -11,14 +11,110 @@ Both modes run pre-gold and post-gold tests in parallel across all repos.
 import argparse
 import asyncio
 import json
+import logging
 import os
 import shutil
 import subprocess
+import sys
+import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import modal
 modal.enable_output()
+
+
+# ============================================================================
+# Asyncio Exception Logging (to diagnose 'socket.send() raised exception')
+# ============================================================================
+
+class DeduplicatingFilter(logging.Filter):
+    """A logging filter that suppresses repeated log messages after a threshold."""
+    
+    def __init__(self, max_repeats: int = 5):
+        super().__init__()
+        self.max_repeats = max_repeats
+        self._message_counts: dict[str, int] = {}
+    
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Create a key from the log message (truncate to avoid memory issues)
+        msg_key = f"{record.levelname}:{record.getMessage()[:100]}"
+        
+        self._message_counts[msg_key] = self._message_counts.get(msg_key, 0) + 1
+        count = self._message_counts[msg_key]
+        
+        if count <= self.max_repeats:
+            if count == self.max_repeats:
+                # Modify the message to indicate suppression
+                record.msg = f"{record.msg} (further repeats will be suppressed)"
+            return True
+        elif count % 1000 == 0:
+            # Log summary every 1000 occurrences
+            record.msg = f"[Repeated {count}x] {record.msg}"
+            return True
+        return False
+
+
+def setup_asyncio_exception_logging():
+    """
+    Configure asyncio to limit duplicate log messages and capture exception details.
+    
+    The 'socket.send() raised exception' warning is logged by asyncio's 
+    _SelectorSocketTransport.write() when an SSL/socket error occurs. This 
+    adds a deduplication filter to prevent log spam.
+    """
+    # Get the asyncio logger and clear any existing handlers to avoid duplicates
+    asyncio_logger = logging.getLogger('asyncio')
+    
+    # Remove existing handlers to prevent duplicate output
+    asyncio_logger.handlers.clear()
+    
+    # Add a deduplicating filter
+    dedup_filter = DeduplicatingFilter(max_repeats=5)
+    
+    # Set up a detailed formatter with the dedup filter
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s - [%(filename)s:%(lineno)d]'
+    ))
+    handler.addFilter(dedup_filter)
+    asyncio_logger.addHandler(handler)
+    asyncio_logger.setLevel(logging.WARNING)  # Only warnings and above
+    asyncio_logger.propagate = False  # Don't propagate to root logger (prevents duplicates)
+    
+    # Store exception counts to avoid log spam for unhandled exceptions
+    _exception_counts: dict[str, int] = {}
+    
+    def custom_exception_handler(loop, context):
+        """Custom exception handler that logs full exception details with deduplication."""
+        exception = context.get('exception')
+        message = context.get('message', 'Unknown async error')
+        
+        # Create a key for rate limiting
+        exc_type = type(exception).__name__ if exception else 'Unknown'
+        exc_key = f"{exc_type}:{message[:50]}"
+        
+        _exception_counts[exc_key] = _exception_counts.get(exc_key, 0) + 1
+        count = _exception_counts[exc_key]
+        
+        # Only log full details for first 5 occurrences of each type
+        if count <= 5:
+            if exception:
+                logging.error(
+                    f"Asyncio exception #{count}: {message}\n"
+                    f"  Exception type: {type(exception).__name__}\n"
+                    f"  Exception: {exception}\n"
+                    f"  Context: {context}"
+                )
+                if count == 5:
+                    logging.warning(f"  (Further '{exc_key}' exceptions will be suppressed)")
+            else:
+                logging.error(f"Asyncio error #{count}: {message} | Context: {context}")
+        elif count % 1000 == 0:
+            # Log summary every 1000 occurrences
+            logging.warning(f"Asyncio '{exc_key}' exception count: {count}")
+    
+    return custom_exception_handler
 
 # ============================================================================
 # Constants & Configuration
@@ -502,6 +598,11 @@ async def run_pregold_phase_async(repos_with_patches: dict, max_concurrent: int,
     semaphore = asyncio.Semaphore(max_concurrent)
     failed_repos = previously_failed.copy()  # Start with previously failed repos
     
+    # Install custom exception handler to log socket.send() exception details
+    loop = asyncio.get_running_loop()
+    exception_handler = setup_asyncio_exception_logging()
+    loop.set_exception_handler(exception_handler)
+    
     async def process_baseline(task: dict) -> tuple[dict, dict]:
         """Process a single baseline test."""
         result = await run_validation_in_sandbox(
@@ -620,6 +721,11 @@ async def run_postgold_phase_async(all_patches: list, max_concurrent: int, env_n
     
     # Semaphore controls max concurrent operations
     semaphore = asyncio.Semaphore(max_concurrent)
+    
+    # Install custom exception handler to log socket.send() exception details
+    loop = asyncio.get_running_loop()
+    exception_handler = setup_asyncio_exception_logging()
+    loop.set_exception_handler(exception_handler)
     
     async def process_single_task(task: dict) -> dict:
         """Process a single validation task."""
@@ -740,7 +846,7 @@ def parse_args():
     parser.add_argument("--max-entities", type=int, default=2000, help="Max entities to sample (-1 for all)")
     parser.add_argument("--max-candidates", type=int, default=2000, help="Max candidates to process (-1 for all)")
     parser.add_argument("--validate-only", action="store_true", help="Only validate existing patches")
-    parser.add_argument("--max-concurrent-tests", type=int, default=400, help="Max concurrent tests (default: 400)")
+    parser.add_argument("--max-concurrent-tests", type=int, default=900, help="Max concurrent tests (default: 900)")
     return parser.parse_args()
 
 
