@@ -1,22 +1,36 @@
+"""
+Modal Bug Generation & Validation Script
+
+Supports two modes:
+1. Generation + Validation: Generate bugs remotely, then validate them
+2. Validate-only: Validate existing patches from local logs
+
+Both modes run pre-gold and post-gold tests in parallel across all repos.
+"""
+
 import argparse
+import json
 import os
 import shutil
-import json
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import modal
-modal.enable_output()  # Enable detailed build logs
+modal.enable_output()
 
-# Constants
+# ============================================================================
+# Constants & Configuration
+# ============================================================================
+
 APP_NAME = "swesmith-bug-gen"
 MINUTES = 60
+MODAL_TIMEOUT = 10 * MINUTES
 
-# Mapping from language name to profile base class name
 LANGUAGE_TO_BASE_CLASS = {
     "python": "PythonProfile",
     "javascript": "JavaScriptProfile",
-    "typescript": "JavaScriptProfile",  # TypeScript uses JavaScriptProfile
+    "typescript": "JavaScriptProfile",
     "golang": "GoProfile",
     "go": "GoProfile",
     "rust": "RustProfile",
@@ -27,6 +41,14 @@ LANGUAGE_TO_BASE_CLASS = {
     "php": "PhpProfile",
 }
 
+TEST_OUTPUT_START = ">>>>> Start Test Output"
+TEST_OUTPUT_END = ">>>>> End Test Output"
+PREGOLD_TIMEOUT = 200  # seconds - skip post-gold if baseline exceeds this
+MIN_PATCHES_FOR_VALIDATION = 50  # skip repos with fewer patches
+
+# ============================================================================
+# Profile & Repo Utilities
+# ============================================================================
 
 def get_repos_for_language(language: str) -> list[str]:
     """Get all registered repos for a given language."""
@@ -36,46 +58,35 @@ def get_repos_for_language(language: str) -> list[str]:
     if not base_class_name:
         raise ValueError(f"Unknown language: {language}. Supported: {list(LANGUAGE_TO_BASE_CLASS.keys())}")
     
-    repos = []
-    # Get unique profile classes (values() returns unique profiles)
-    for profile in registry.values():
-        # Check if the profile class is a subclass of the language-specific base class
-        if profile.__class__.__name__ != base_class_name and base_class_name in [
-            base.__name__ for base in profile.__class__.__mro__
-        ]:
-            repos.append(f"{profile.owner}/{profile.repo}")
-    return repos
+    return [
+        f"{profile.owner}/{profile.repo}"
+        for profile in registry.values()
+        if profile.__class__.__name__ != base_class_name
+        and base_class_name in [base.__name__ for base in profile.__class__.__mro__]
+    ]
 
 
 def resolve_profile(repo_name: str):
     """Resolve a profile from repo name using robust lookup."""
     from swesmith.profiles import registry
     
-    profile = None
-    
-    # Try direct lookup first
     try:
-        profile = registry.get(repo_name)
+        return registry.get(repo_name)
     except KeyError:
-        # Try owner/repo match
         for key in registry.keys():
             try:
                 p = registry.get(key)
                 if f"{p.owner}/{p.repo}" == repo_name:
-                    profile = p
-                    break
+                    return p
             except Exception:
                 continue
-    
-    if not profile:
-        raise RuntimeError(f"No profile found for repo: {repo_name}")
-    
-    return profile
+    raise RuntimeError(f"No profile found for repo: {repo_name}")
 
 
+# ============================================================================
+# Modal Setup & Images
+# ============================================================================
 
-# Generator Image: For procedural generation
-# Use minimal 'generate' dependency group to avoid heavy packages like sglang, litellm, openai, etc.
 generator_image = (
     modal.Image.from_registry("ubuntu:22.04", add_python="3.11")
     .apt_install("git")
@@ -85,7 +96,6 @@ generator_image = (
     .add_local_file(".env", remote_path="/root/.env")
 )
 
-# Cache for dynamically created validator images
 _validator_image_cache: dict[str, modal.Image] = {}
 
 
@@ -104,39 +114,23 @@ def get_validator_image(image_name: str) -> modal.Image:
 app = modal.App(APP_NAME)
 
 
-def _safe_execute(func, error_msg: str, *args, **kwargs):
-    """Helper to execute a function with error handling and traceback."""
-    import traceback
-    try:
-        return func(*args, **kwargs)
-    except Exception as e:
-        print(f"{error_msg}: {e}")
-        traceback.print_exc()
-        return None
-
-
-MODAL_TIMEOUT = 10 * MINUTES
-
+# ============================================================================
+# Remote Bug Generation
+# ============================================================================
 
 @app.function(
     image=generator_image,
     secrets=[modal.Secret.from_name("GITHUB_TOKEN")],
     timeout=MODAL_TIMEOUT,
 )
-def generate_bugs_remote(repo_name: str, max_bugs: int, interleave: bool, max_entities: int, max_candidates: int, timeout_buffer_seconds: int = 15) -> dict:
-    """
-    Generates bugs for the repository on a remote Modal worker.
-    Uses try-finally to ensure partial results are saved even on timeout/cancellation.
-    
-    Args:
-        timeout_buffer_seconds: Soft timeout triggers this many seconds before Modal's hard timeout,
-                               giving the finally block time to collect and return partial results.
-    """
-    import os
+def generate_bugs_remote(
+    repo_name: str, max_bugs: int, interleave: bool,
+    max_entities: int, max_candidates: int, timeout_buffer_seconds: int = 15
+) -> dict:
+    """Generate bugs for a repository on a remote Modal worker."""
     import sys
     from io import StringIO
 
-    # Add /root to sys.path to be double sure
     if "/root" not in sys.path:
         sys.path.append("/root")
 
@@ -144,17 +138,14 @@ def generate_bugs_remote(repo_name: str, max_bugs: int, interleave: bool, max_en
     from swesmith.bug_gen.procedural.generate import main as generate_main
     from swesmith.bug_gen.collect_patches import main as collect_patches_main
 
-    # Capture all stdout and stderr for logging while also mirroring to original streams
+    # Setup output capture
     log_buffer = StringIO()
-    original_stdout = sys.stdout
-    original_stderr = sys.stderr
+    original_stdout, original_stderr = sys.stdout, sys.stderr
     artifacts = {}
 
     class TeeWriter:
-        """Write to both a buffer and the original stream."""
         def __init__(self, buffer, original):
-            self.buffer = buffer
-            self.original = original
+            self.buffer, self.original = buffer, original
         def write(self, data):
             self.buffer.write(data)
             self.original.write(data)
@@ -162,584 +153,583 @@ def generate_bugs_remote(repo_name: str, max_bugs: int, interleave: bool, max_en
             self.buffer.flush()
             self.original.flush()
 
-    # Redirect stdout/stderr to capture logs while mirroring to original streams
     sys.stdout = TeeWriter(log_buffer, original_stdout)
     sys.stderr = TeeWriter(log_buffer, original_stderr)
 
-    # Identify Repo ID
-    repo_id = repo_name
+    # Resolve repo ID
     def resolve_repo_id():
         try:
-            profile = registry.get_from_inst({"repo": repo_name, "instance_id": "dummy"})
-            return profile.repo_name
+            return registry.get_from_inst({"repo": repo_name, "instance_id": "dummy"}).repo_name
         except Exception as e:
             print(f"Direct profile lookup failed for {repo_name}: {e}")
             target = repo_name.replace("/", "__")
             candidates = [key for key in registry.keys() if target in key]
-            if candidates:
-                return candidates[0]
-            return repo_name
+            return candidates[0] if candidates else repo_name
 
     repo_id = resolve_repo_id()
     print(f"Resolved repo_id: {repo_id}")
-
     logs_base = Path("logs/bug_gen")
 
-    # Helper to collect and return results
+    def _safe_execute(func, error_msg, *args, **kwargs):
+        import traceback
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            print(f"{error_msg}: {e}")
+            traceback.print_exc()
+            return None
+
     def collect_results():
         if not logs_base.exists():
             print(f"LOGS BASE MISSING: {logs_base}")
-            if Path(repo_id).exists():
-                print(f"Found repo dir {repo_id} in current dir, but logs/bug_gen is missing.")
             return
 
-        generated_repo_dirs = [d for d in logs_base.iterdir() if d.is_dir()]
-        if not generated_repo_dirs:
-            files = [str(p) for p in logs_base.glob("**/*")]
-            print(f"NO DATA IN LOGS BASE. Files found: {files}")
+        generated_dirs = [d for d in logs_base.iterdir() if d.is_dir()]
+        if not generated_dirs:
+            print(f"NO DATA IN LOGS BASE. Files: {list(logs_base.glob('**/*'))}")
             return
 
-        repo_id_actual = sorted(generated_repo_dirs, key=lambda x: x.stat().st_mtime, reverse=True)[0].name
+        repo_id_actual = sorted(generated_dirs, key=lambda x: x.stat().st_mtime, reverse=True)[0].name
         print(f"Detected repo_id_actual: {repo_id_actual}")
 
-        # Collect patches (don't check return value - collect_patches_main returns None on success)
         _safe_execute(collect_patches_main, "Error in collect_patches_main", str(logs_base / repo_id_actual))
 
-        # Zip the bug gen dir
-        def _zip_and_save():
+        # Zip and save
+        def _zip():
             shutil.make_archive(f"/tmp/{repo_id_actual}", 'zip', str(logs_base / repo_id_actual))
             with open(f"/tmp/{repo_id_actual}.zip", "rb") as f:
                 artifacts["bug_gen_zip"] = f.read()
-                print(f"Created bug_gen_zip: {len(artifacts['bug_gen_zip'])} bytes")
+            print(f"Created bug_gen_zip: {len(artifacts['bug_gen_zip'])} bytes")
+        _safe_execute(_zip, "Error creating bug_gen_zip")
 
-        _safe_execute(_zip_and_save, "Error creating bug_gen_zip")
-
-        # Get the all_patches.json
         patches_file = logs_base / f"{repo_id_actual}_all_patches.json"
         if patches_file.exists():
-            with open(patches_file, "r") as f:
-                artifacts["patches_json"] = f.read()
-                print(f"Successfully read patches_json: {len(artifacts['patches_json'])} bytes")
+            artifacts["patches_json"] = patches_file.read_text()
+            print(f"Read patches_json: {len(artifacts['patches_json'])} bytes")
         else:
-            existing_files = [str(p.name) for p in logs_base.iterdir()]
-            print(f"Patches file {patches_file} not found. Available: {existing_files}")
+            print(f"Patches file not found. Available: {[p.name for p in logs_base.iterdir()]}")
 
-    # Calculate soft timeout to ensure finally block has time to run
     soft_timeout = MODAL_TIMEOUT - timeout_buffer_seconds
-    print(f"Soft timeout set to {soft_timeout}s (Modal timeout: {MODAL_TIMEOUT}s, buffer: {timeout_buffer_seconds}s)")
+    print(f"Soft timeout: {soft_timeout}s")
 
-    # Use try-finally to ensure partial results are saved even on timeout/cancellation
     try:
-        # Pass timeout to generate_main which will check it after each _process_candidate call
         generate_main(
             repo=repo_id, max_bugs=max_bugs, seed=24, interleave=interleave,
             max_entities=max_entities, max_candidates=max_candidates,
             timeout_seconds=soft_timeout
         )
     except Exception as e:
-        print(f"Error in generate_main: {e}")
         import traceback
+        print(f"Error in generate_main: {e}")
         traceback.print_exc()
     finally:
-        # Restore stdout/stderr and collect results
-        sys.stdout = original_stdout
-        sys.stderr = original_stderr
+        sys.stdout, sys.stderr = original_stdout, original_stderr
         print("\nCollecting partial results...")
-
-        _safe_execute(collect_results, "Error collecting partial results")
-
-        # Capture logs
+        _safe_execute(collect_results, "Error collecting results")
         artifacts["modal_output_log"] = log_buffer.getvalue()
-        print(f"Captured {len(artifacts['modal_output_log'])} bytes of logs")
-
-        # Mark error if logs_base doesn't exist
         if not logs_base.exists():
             artifacts["error"] = f"Logs directory {logs_base} does not exist."
 
     return artifacts
 
 
-# Markers for parsing test output
-TEST_OUTPUT_START = ">>>>> Start Test Output"
-TEST_OUTPUT_END = ">>>>> End Test Output"
-
+# ============================================================================
+# Validation Sandbox
+# ============================================================================
 
 def run_validation_in_sandbox(
-    app: modal.App,
-    image_name: str,
-    instance_id: str,
-    test_cmd: str,
-    workdir: str,
-    patch: str | None = None,
-    timeout: int = 300,
+    app: modal.App, image_name: str, instance_id: str,
+    test_cmd: str, workdir: str, patch: str | None = None, timeout: int = 300
 ) -> dict:
-    """
-    Run validation in a Modal Sandbox with a specific Docker image.
-    This allows running code in any container without pre-registering functions.
-    """
+    """Run validation in a Modal Sandbox with a specific Docker image."""
     validator_image = get_validator_image(image_name)
     
-    # Build the script to run inside the sandbox
-    # Use set -uxo pipefail with : 'marker' for proper synchronization
-    # The -x flag traces commands, ensuring markers appear in correct order relative to test output
     script_lines = [
-        "#!/bin/bash",
-        "exec 2>&1",      # Merge stderr into stdout at the script level
-        "set -uxo pipefail",
-        f"cd {workdir}",
-        "git checkout .",  # Clean state
+        "#!/bin/bash", "exec 2>&1", "set -uxo pipefail",
+        f"cd {workdir}", "git checkout .",
     ]
     
     if patch:
-        # Write patch to file and apply it
         script_lines.extend([
             f"cat > /tmp/{instance_id}.diff << 'PATCH_EOF'",
-            patch,
-            "PATCH_EOF",
+            patch, "PATCH_EOF",
             f"git apply /tmp/{instance_id}.diff",
         ])
     
-    # Run tests with markers - using : (no-op) with shell tracing (-x) ensures
-    # markers appear at the right time in the output stream
     script_lines.extend([
         f": '{TEST_OUTPUT_START}'",
-        f"{test_cmd} || true",  # Don't fail on test failures
+        f"{test_cmd} || true",
         f": '{TEST_OUTPUT_END}'",
     ])
     
-    script = "\n".join(script_lines)
-    
     try:
-        # Create and run sandbox
-        sb = modal.Sandbox.create(
-            app=app,
-            image=validator_image,
-            timeout=timeout,
-        )
-        
-        # Run the script
-        # Redirection 'exec 2>&1' inside the script handles the merge without PTY side effects
-        process = sb.exec("bash", "-c", script)
-        
-        # Wait for completion and get output
-        output_raw = process.stdout.read()
+        sb = modal.Sandbox.create(app=app, image=validator_image, timeout=timeout)
+        process = sb.exec("bash", "-c", "\n".join(script_lines))
+        try:
+            output_raw = process.stdout.read()
+        except UnicodeDecodeError as e:
+            # Modal's stdout.read() failed to decode - sandbox output has binary data
+            return {"instance_id": instance_id, "error": f"Binary output (decode failed at pos {e.start})"}
         exit_code = process.wait()
-        
         sb.terminate()
         
-        # Decode bytes to string if necessary, replacing invalid characters
-        if isinstance(output_raw, bytes):
-            output = output_raw.decode("utf-8", errors="replace")
-        else:
-            output = output_raw
-        
-        return {
-            "instance_id": instance_id,
-            "output": output,
-            "exit_code": exit_code,
-        }
+        output = output_raw.decode("utf-8", errors="replace") if isinstance(output_raw, bytes) else output_raw
+        return {"instance_id": instance_id, "output": output, "exit_code": exit_code}
+    except UnicodeDecodeError as e:
+        return {"instance_id": instance_id, "error": f"Binary output (decode failed at pos {e.start})"}
     except Exception as e:
-        return {
-            "instance_id": instance_id,
-            "error": str(e),
-        }
+        err_str = str(e)
+        if "timeout" in err_str.lower() or "SandboxTimeoutError" in err_str:
+            return {"instance_id": instance_id, "error": f"Timeout ({timeout}s)"}
+        return {"instance_id": instance_id, "error": err_str}
 
+
+# ============================================================================
+# Generation Phase
+# ============================================================================
 
 def spawn_generation_task(repo_name: str, max_bugs: int, interleave: bool, max_entities: int, max_candidates: int):
-    """
-    Spawn a generation task without blocking (returns a FunctionCall handle).
-    Returns (repo_name, repo_id, handle) or (repo_name, None, error_dict) on failure.
-    """
+    """Spawn a generation task without blocking."""
     try:
         profile = resolve_profile(repo_name)
-        repo_id = profile.repo_name
         print(f"Spawning generation for {repo_name} (profile: {profile.__class__.__name__})...")
-        
-        # spawn() returns immediately with a FunctionCall handle
         handle = generate_bugs_remote.spawn(
-            repo_name=repo_name,
-            max_bugs=max_bugs,
-            interleave=interleave,
-            max_entities=max_entities,
-            max_candidates=max_candidates
+            repo_name=repo_name, max_bugs=max_bugs, interleave=interleave,
+            max_entities=max_entities, max_candidates=max_candidates
         )
-        return (repo_name, repo_id, handle)
+        return (repo_name, profile.repo_name, handle)
     except Exception as e:
         return (repo_name, None, {"repo": repo_name, "error": f"Failed to resolve profile: {e}"})
 
 
 def process_generation_result(repo_name: str, repo_id: str, results: dict) -> dict:
-    """
-    Process the results from a completed generation task.
-    """
+    """Process results from a completed generation task."""
+    local_bug_dir = Path(f"logs/bug_gen/{repo_id}")
+    local_bug_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save logs if available
+    if results.get("modal_output_log"):
+        (local_bug_dir / "modal_output.log").write_text(results["modal_output_log"], errors='replace')
+
     if "error" in results:
-        print(f"Error during bug generation for {repo_name}:")
-        print(results["error"])
-        if "traceback" in results:
-            print(results["traceback"])
+        print(f"Error during bug generation for {repo_name}: {results['error']}")
         return {"repo": repo_name, "repo_id": repo_id, "error": results["error"]}
 
-    # Parse result patches
     if "patches_json" not in results:
         print(f"Warning: No patches_json returned for {repo_name}")
-        # Always save logs for debugging, even without bug_gen_zip
-        local_bug_dir = Path(f"logs/bug_gen/{repo_id}")
-        local_bug_dir.mkdir(parents=True, exist_ok=True)
-        
         if "bug_gen_zip" in results:
-            print("Saving bug_gen_zip for manual inspection...")
             zip_path = local_bug_dir / "bugs.zip"
-            with open(zip_path, "wb") as f:
-                f.write(results["bug_gen_zip"])
+            zip_path.write_bytes(results["bug_gen_zip"])
             subprocess.run(["unzip", "-o", str(zip_path), "-d", str(local_bug_dir)], check=True)
-            print(f"Bugs extracted to {local_bug_dir}")
-
-        # Save modal output log if available (always, for debugging)
-        if "modal_output_log" in results and results["modal_output_log"]:
-            log_path = local_bug_dir / "modal_output.log"
-            with open(log_path, "w") as f:
-                f.write(results["modal_output_log"])
-            print(f"Modal output logs saved to {log_path}")
-        else:
-            print(f"Warning: No modal_output_log in results for {repo_name}")
-            print(f"Results keys: {list(results.keys())}")
-
         return {"repo": repo_name, "repo_id": repo_id, "error": "No patches_json returned"}
 
     patches = json.loads(results["patches_json"])
     if not patches:
-        print(f"No bugs were generated for {repo_name}.")
+        print(f"No bugs generated for {repo_name}.")
         return {"repo": repo_name, "repo_id": repo_id, "patches": [], "total_bugs": 0}
 
-    # Save artifacts locally
-    local_bug_dir = Path(f"logs/bug_gen/{repo_id}")
-    local_bug_dir.mkdir(parents=True, exist_ok=True)
-
-    with open(local_bug_dir.parent / f"{repo_id}_all_patches.json", "w") as f:
-        f.write(results["patches_json"])
+    # Save patches
+    (local_bug_dir.parent / f"{repo_id}_all_patches.json").write_text(results["patches_json"])
 
     if "bug_gen_zip" in results:
         zip_path = local_bug_dir / "bugs.zip"
-        with open(zip_path, "wb") as f:
-            f.write(results["bug_gen_zip"])
+        zip_path.write_bytes(results["bug_gen_zip"])
         subprocess.run(["unzip", "-o", str(zip_path), "-d", str(local_bug_dir)], check=True)
-        os.remove(zip_path)
-
-    # Save modal output log if available
-    if "modal_output_log" in results and results["modal_output_log"]:
-        log_path = local_bug_dir / "modal_output.log"
-        with open(log_path, "w") as f:
-            f.write(results["modal_output_log"])
-        print(f"Modal output logs saved to {log_path}")
+        zip_path.unlink()
 
     print(f"Generated {len(patches)} bugs for {repo_name}")
-    return {
-        "repo": repo_name,
-        "repo_id": repo_id,
-        "patches": patches,
-        "total_bugs": len(patches)
-    }
+    return {"repo": repo_name, "repo_id": repo_id, "patches": patches, "total_bugs": len(patches)}
 
 
-def process_single_repo_validation(repo_name: str, repo_id: str, patches: list, profile, modal_app: modal.App) -> dict:
-    """
-    Process validation for a single repo (within app.run() context).
-    Returns validation results dict.
-    """
-    print(f"\n{'='*60}")
-    print(f"Validating {len(patches)} bugs for: {repo_name}")
-    print(f"{'='*60}")
+def run_generation_phase(repos: list[str], args) -> list[dict]:
+    """Run bug generation for all repos in parallel."""
+    print(f"{'#'*60}")
+    print(f"# PHASE 1: BUG GENERATION ({len(repos)} repos)")
+    print(f"{'#'*60}\n")
+
+    spawn_results = [
+        spawn_generation_task(repo, args.max_bugs, args.interleave, args.max_entities, args.max_candidates)
+        for repo in repos
+    ]
+    print(f"Spawned {len(spawn_results)} generation tasks. Waiting for results...\n")
+
+    generation_results = []
+    for repo_name, repo_id, handle_or_error in spawn_results:
+        if isinstance(handle_or_error, dict):
+            generation_results.append(handle_or_error)
+        else:
+            try:
+                results = handle_or_error.get()
+                generation_results.append(process_generation_result(repo_name, repo_id, results))
+            except Exception as e:
+                generation_results.append({"repo": repo_name, "repo_id": repo_id, "error": f"Generation failed: {e}"})
+
+    return generation_results
+
+
+# ============================================================================
+# Validation Phase
+# ============================================================================
+
+def annotate_patches(patches: list, repo: str, repo_id: str, profile) -> list:
+    """Add metadata to patches for validation."""
+    for p in patches:
+        p["_repo"] = repo
+        p["_repo_id"] = repo_id
+        p["_profile"] = profile
+    return patches
+
+
+def collect_patches_from_files(repos: list[str]) -> list[dict]:
+    """Collect patches from local files for validate-only mode."""
+    all_patches = []
+    for repo in repos:
+        try:
+            profile = resolve_profile(repo)
+        except Exception:
+            print(f"  Skipping {repo}: profile not found")
+            continue
+
+        repo_id = profile.repo_name
+        patches_file = Path(f"logs/bug_gen/{repo_id}_all_patches.json")
+        if patches_file.exists():
+            patches = json.loads(patches_file.read_text())
+            all_patches.extend(annotate_patches(patches, repo, repo_id, profile))
+            print(f"  {repo}: {len(patches)} patches")
+        else:
+            print(f"  Skipping {repo}: no patches file")
+    return all_patches
+
+
+def collect_patches_from_generation(generation_results: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Collect patches from generation results, separating errors."""
+    all_patches, errors = [], []
+    for gen_result in generation_results:
+        if "error" in gen_result:
+            errors.append(gen_result)
+            continue
+        patches = gen_result.get("patches", [])
+        if patches:
+            profile = resolve_profile(gen_result["repo"])
+            all_patches.extend(annotate_patches(patches, gen_result["repo"], gen_result["repo_id"], profile))
+    return all_patches, errors
+
+
+def build_repos_with_patches(all_patches: list) -> dict:
+    """Build repos_with_patches dict from annotated patches."""
+    repos = {}
+    for p in all_patches:
+        repo = p["_repo"]
+        if repo not in repos:
+            repos[repo] = {"profile": p["_profile"], "repo_id": p["_repo_id"]}
+    return repos
+
+
+def process_postgold_result(task: dict, result: dict, get_valid_report) -> dict:
+    """Process a single post-gold test result."""
+    instance_id, repo, repo_id = task["instance_id"], task["repo"], task["repo_id"]
     
-    from swesmith.constants import ENV_NAME
-    test_cmd = profile.test_cmd
-    workdir = f"/{ENV_NAME}"
+    if "error" in result:
+        return {"instance_id": instance_id, "repo": repo, "error": result["error"], "valid": False}
     
-    print(f"Test command: {test_cmd}")
-    print(f"Workdir: {workdir}")
-    print(f"Using image: {profile.image_name}")
+    # Save output
+    inst_log_dir = Path(f"logs/run_validation/{repo_id}/{instance_id}")
+    inst_log_dir.mkdir(parents=True, exist_ok=True)
+    (inst_log_dir / "test_output.txt").write_text(result["output"], errors='replace')
     
-    # 1. Run Baseline (Pre-gold)
-    baseline_id = f"{repo_id}.ref"
-    print(f"Running baseline (pre-gold) test suite for {baseline_id}...")
+    # Check baseline
+    baseline_path = f"logs/run_validation/{repo_id}/{repo_id}.ref/test_output.txt"
+    if not os.path.exists(baseline_path):
+        return {"instance_id": instance_id, "repo": repo, "error": f"Baseline not found", "valid": False}
     
-    baseline = run_validation_in_sandbox(
-        app=modal_app,
-        image_name=profile.image_name,
-        instance_id=baseline_id,
-        test_cmd=test_cmd,
-        workdir=workdir,
-        patch=None,
-        timeout=profile.timeout_ref
-    )
-    
-    if "error" in baseline:
-        print(f"Baseline failed for {repo_name}: {baseline['error']}")
-        return {"repo": repo_name, "error": f"Baseline failed: {baseline['error']}"}
-    
-    # Save baseline results
-    valid_results_dir = Path(f"logs/run_validation/{repo_id}")
-    valid_results_dir.mkdir(parents=True, exist_ok=True)
-    
-    baseline_dir = valid_results_dir / baseline_id
-    baseline_dir.mkdir(parents=True, exist_ok=True)
-    
-    baseline_log_path = baseline_dir / "test_output.txt"
-    with open(baseline_log_path, "w") as f:
-        f.write(baseline["output"])
-    
-    # 2. Run post-gold for all patches in parallel
-    # Using ThreadPoolExecutor to run multiple Sandboxes concurrently
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    
-    print(f"Running post-gold tests in parallel for {len(patches)} patches...")
-    
-    def run_patch_validation(patch_info):
-        idx, p = patch_info
-        return run_validation_in_sandbox(
-            app=modal_app,
-            image_name=profile.image_name,
-            instance_id=p["instance_id"],
-            test_cmd=test_cmd,
-            workdir=workdir,
-            patch=p["patch"],
-            timeout=profile.timeout
+    # Grade
+    try:
+        report = get_valid_report(
+            val_pregold_path=baseline_path,
+            val_postgold_path=str(inst_log_dir / "test_output.txt"),
+            instance=task["full_patch"]
         )
+        (inst_log_dir / "report.json").write_text(json.dumps(report, indent=4))
+        is_valid = len(report.get("PASS_TO_FAIL", [])) > 0
+        return {"instance_id": instance_id, "repo": repo, "valid": is_valid}
+    except Exception as e:
+        return {"instance_id": instance_id, "repo": repo, "error": f"Grading error: {e}", "valid": False}
+
+
+def run_pregold_phase(repos_with_patches: dict, max_concurrent: int, env_name: str) -> set[str]:
+    """Run all pre-gold (baseline) tests. Returns set of repos with 0 passing tests (to skip)."""
+    from swesmith.harness.grading import read_test_output
+    from swebench.harness.constants import TestStatus
     
-    val_results = [None] * len(patches)
-    max_workers = 100  # Limit concurrent sandboxes
+    print(f"\nPHASE: PRE-GOLD (BASELINE) TESTS")
+    print(f"Running {len(repos_with_patches)} baselines, max concurrent: {max_concurrent}")
     
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all tasks
-        future_to_idx = {
-            executor.submit(run_patch_validation, (i, p)): i 
-            for i, p in enumerate(patches)
+    tasks = [
+        {"repo": repo, "repo_id": info["repo_id"], "profile": info["profile"],
+         "instance_id": f"{info['repo_id']}.ref", "workdir": f"/{env_name}"}
+        for repo, info in repos_with_patches.items()
+        if not Path(f"logs/run_validation/{info['repo_id']}/{info['repo_id']}.ref/test_output.txt").exists()
+    ]
+    
+    for repo in repos_with_patches:
+        if not any(t["repo"] == repo for t in tasks):
+            print(f"  Skipping {repo}: baseline exists")
+    
+    if not tasks:
+        print("  All baselines already exist!\n")
+        return set()
+    
+    completed = 0
+    failed_repos = set()  # Repos with 0 passing tests
+    
+    with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
+        future_to_task = {
+            executor.submit(
+                run_validation_in_sandbox, app=app,
+                image_name=t["profile"].image_name, instance_id=t["instance_id"],
+                test_cmd=t["profile"].test_cmd, workdir=t["workdir"],
+                patch=None, timeout=PREGOLD_TIMEOUT
+            ): t for t in tasks
         }
         
-        # Collect results as they complete
-        completed = 0
-        for future in as_completed(future_to_idx):
-            idx = future_to_idx[future]
-            try:
-                val_results[idx] = future.result()
-            except Exception as e:
-                val_results[idx] = {"instance_id": patches[idx]["instance_id"], "error": str(e)}
+        for future in as_completed(future_to_task):
+            task = future_to_task[future]
             completed += 1
-            if completed % 10 == 0 or completed == len(patches):
-                print(f"  Progress: {completed}/{len(patches)} patches validated")
+            try:
+                result = future.result()
+                if "error" not in result:
+                    baseline_dir = Path(f"logs/run_validation/{task['repo_id']}/{task['instance_id']}")
+                    baseline_dir.mkdir(parents=True, exist_ok=True)
+                    output_path = baseline_dir / "test_output.txt"
+                    output_path.write_text(result["output"], errors='replace')
+                    
+                    # Validate baseline has at least 1 passing test
+                    try:
+                        test_output, found = read_test_output(str(output_path))
+                        if found and test_output:
+                            status_map = task["profile"].log_parser(test_output)
+                            passed = sum(1 for s in status_map.values() if s == TestStatus.PASSED.value)
+                            if passed == 0:
+                                status = f"⚠️ 0 tests passed (skipping post-gold)"
+                                failed_repos.add(task["repo"])
+                            else:
+                                status = f"OK ({passed} tests passed)"
+                        else:
+                            # Diagnose why test output wasn't found
+                            raw_output = result["output"]
+                            if "APPLY_PATCH_FAIL" in raw_output or "error: patch failed" in raw_output:
+                                reason = "patch apply failed"
+                            elif TEST_OUTPUT_START not in raw_output:
+                                reason = "test command crashed before start marker"
+                            elif TEST_OUTPUT_END not in raw_output:
+                                reason = "tests never completed (no end marker)"
+                            elif not test_output:
+                                reason = "no test output between markers"
+                            else:
+                                reason = "unknown"
+                            status = f"⚠️ {reason} (skipping post-gold)"
+                            failed_repos.add(task["repo"])
+                    except Exception as e:
+                        status = f"OK (parse check failed: {e})"
+                else:
+                    status = f"ERROR: {result['error'][:50]}"
+                    failed_repos.add(task["repo"])
+            except Exception as e:
+                status = f"EXCEPTION: {e}"
+                failed_repos.add(task["repo"])
+            print(f"  [{completed}/{len(tasks)}] {task['repo']}: {status}")
     
-    # 3. Grade locally
+    print(f"Pre-gold complete: {completed} baselines")
+    if failed_repos:
+        print(f"  ⚠️ {len(failed_repos)} repos will be skipped in post-gold")
+    print()
+    return failed_repos
+
+
+def run_postgold_phase(all_patches: list, max_concurrent: int, env_name: str) -> list[dict]:
+    """Run all post-gold tests."""
     from swesmith.harness.grading import get_valid_report
-    reports = []
-    valid_bugs_count = 0
     
-    for i, res in enumerate(val_results):
-        if "error" in res:
-            inst_id = patches[i].get("instance_id", f"patch_{i}")
-            print(f"Validation error for {inst_id}: {res['error']}")
-            continue
-        
-        inst_id = res["instance_id"]
-        inst_log_dir = valid_results_dir / inst_id
-        inst_log_dir.mkdir(parents=True, exist_ok=True)
-        
-        log_path = inst_log_dir / "test_output.txt"
-        with open(log_path, "w") as f:
-            f.write(res["output"])
-        
-        try:
-            report = get_valid_report(
-                val_pregold_path=str(baseline_log_path),
-                val_postgold_path=str(log_path),
-                instance=patches[i]
-            )
-            
-            with open(inst_log_dir / "report.json", "w") as f:
-                json.dump(report, f, indent=4)
-            
-            reports.append({
-                "instance_id": inst_id,
-                "report": report
-            })
-            
-            if len(report.get("PASS_TO_FAIL", [])) > 0:
-                valid_bugs_count += 1
-        except Exception as e:
-            print(f"Error grading {inst_id}: {e}")
+    print(f"PHASE: POST-GOLD TESTS")
+    print(f"Running {len(all_patches)} patches, max concurrent: {max_concurrent}")
     
-    # Save validation summary
-    with open(valid_results_dir / "validation_summary.json", "w") as f:
-        json.dump(reports, f, indent=2)
+    tasks = [
+        {"repo": p["_repo"], "repo_id": p["_repo_id"], "profile": p["_profile"],
+         "instance_id": p["instance_id"], "patch": p["patch"],
+         "workdir": f"/{env_name}", "full_patch": p}
+        for p in all_patches
+        if not Path(f"logs/run_validation/{p['_repo_id']}/{p['instance_id']}/report.json").exists()
+    ]
     
-    print(f"Validation complete for {repo_name}: {valid_bugs_count}/{len(patches)} valid bugs")
-    return {
-        "repo": repo_name,
-        "total_bugs": len(patches),
-        "valid_bugs": valid_bugs_count,
-        "logs_dir": str(valid_results_dir)
-    }
+    print(f"  {len(all_patches) - len(tasks)} already validated, {len(tasks)} remaining")
+    
+    if not tasks:
+        print("  All patches already validated!")
+        return []
+    
+    results, completed, valid_count = [], 0, 0
+    
+    with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
+        future_to_task = {
+            executor.submit(
+                run_validation_in_sandbox, app=app,
+                image_name=t["profile"].image_name, instance_id=t["instance_id"],
+                test_cmd=t["profile"].test_cmd, workdir=t["workdir"],
+                patch=t["patch"], timeout=t["profile"].timeout
+            ): t for t in tasks
+        }
+        
+        for future in as_completed(future_to_task):
+            task = future_to_task[future]
+            completed += 1
+            try:
+                processed = process_postgold_result(task, future.result(), get_valid_report)
+            except Exception as e:
+                processed = {"instance_id": task["instance_id"], "repo": task["repo"], "error": str(e), "valid": False}
+            
+            results.append(processed)
+            if processed.get("valid"):
+                valid_count += 1
+            if completed % 10 == 0 or completed == len(tasks):
+                print(f"  Progress: {completed}/{len(tasks)} tests, {valid_count} valid bugs")
+    
+    print(f"Post-gold complete: {valid_count}/{len(tasks)} valid bugs\n")
+    return results
 
 
-if __name__ == "__main__":
+def run_validation_phase(all_patches: list, max_concurrent: int, env_name: str) -> list[dict]:
+    """Run complete validation (pre-gold + post-gold). Existing baselines are skipped automatically."""
+    if not all_patches:
+        print("No patches to validate.")
+        return []
+    
+    # Count patches per repo and filter out repos with too few patches
+    repo_patch_counts = {}
+    for p in all_patches:
+        repo = p["_repo"]
+        repo_patch_counts[repo] = repo_patch_counts.get(repo, 0) + 1
+    
+    small_repos = {repo for repo, count in repo_patch_counts.items() if count < MIN_PATCHES_FOR_VALIDATION}
+    if small_repos:
+        original_count = len(all_patches)
+        all_patches = [p for p in all_patches if p["_repo"] not in small_repos]
+        print(f"Skipping {len(small_repos)} repos with <{MIN_PATCHES_FOR_VALIDATION} patches: {', '.join(sorted(small_repos))}")
+        print(f"Filtered out {original_count - len(all_patches)} patches\n")
+    
+    if not all_patches:
+        print("No patches remaining after filtering.")
+        return []
+    
+    repos_with_patches = build_repos_with_patches(all_patches)
+    failed_repos = run_pregold_phase(repos_with_patches, max_concurrent, env_name)
+    
+    # Filter out patches from repos with broken baselines
+    if failed_repos:
+        original_count = len(all_patches)
+        all_patches = [p for p in all_patches if p["_repo"] not in failed_repos]
+        print(f"Filtered out {original_count - len(all_patches)} patches from {len(failed_repos)} repos with broken baselines")
+    
+    return run_postgold_phase(all_patches, max_concurrent, env_name)
+
+
+def print_summary(results: list[dict], repos_count: int):
+    """Print validation summary."""
+    valid_count = sum(1 for r in results if r.get("valid"))
+    
+    print(f"\n{'='*60}")
+    print(f"RESULTS: {valid_count} valid bugs out of {len(results)} patches")
+    print(f"{'='*60}")
+    
+    repo_stats = {}
+    for r in results:
+        repo = r["repo"]
+        if repo not in repo_stats:
+            repo_stats[repo] = {"total": 0, "valid": 0, "errors": 0}
+        repo_stats[repo]["total"] += 1
+        if r.get("valid"):
+            repo_stats[repo]["valid"] += 1
+        if "error" in r:
+            repo_stats[repo]["errors"] += 1
+    
+    print("\nPer-repo breakdown:")
+    for repo, stats in sorted(repo_stats.items()):
+        err = f" ({stats['errors']} errors)" if stats['errors'] else ""
+        print(f"  {repo}: {stats['valid']}/{stats['total']} valid{err}")
+    
+    print(f"\nTotal: {valid_count}/{len(results)} valid bugs across {repos_count} repos")
+
+
+# ============================================================================
+# CLI & Main
+# ============================================================================
+
+def parse_args():
+    """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="Modal Bug Generation & Validation")
-    parser.add_argument("--repos", nargs="*", default=None, help="Repository names (owner/repo). If not specified, runs on all repos for the language.")
-    parser.add_argument("--language", required=True, help="Language (e.g. javascript, python, golang)")
+    parser.add_argument("--repos", nargs="*", help="Repository names (owner/repo)")
+    parser.add_argument("--language", default="javascript", help="Language (default: javascript)")
     parser.add_argument("--max-bugs", type=int, default=200, help="Max bugs per modifier")
     parser.add_argument("--interleave", action="store_true", help="Interleave modifiers")
-    parser.add_argument("--max-entities", type=int, default=2000, help="Maximum number of entities to sample from repositories. Set to -1 to disable sampling.")
-    parser.add_argument("--max-candidates", type=int, default=2000, help="Maximum number of (candidate, modifier) pairs to process. Set to -1 to process all.")
-    parser.add_argument("--validate-only", action="store_true", help="Skip generation and only run validation using local logs")
+    parser.add_argument("--max-entities", type=int, default=2000, help="Max entities to sample (-1 for all)")
+    parser.add_argument("--max-candidates", type=int, default=2000, help="Max candidates to process (-1 for all)")
+    parser.add_argument("--validate-only", action="store_true", help="Only validate existing patches")
+    parser.add_argument("--max-concurrent-tests", type=int, default=400, help="Max concurrent tests (default: 400)")
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
     
-    args = parser.parse_args()
-    
-    # Determine which repos to process
+    # Determine repos
     if args.repos:
-        repos_to_process = args.repos
+        repos = args.repos
     else:
-        repos_to_process = get_repos_for_language(args.language)
-        print(f"Found {len(repos_to_process)} repos for language '{args.language}':")
-        for repo in repos_to_process:
-            print(f"  - {repo}")
+        repos = get_repos_for_language(args.language)
+        print(f"Found {len(repos)} repos for '{args.language}':")
+        for r in repos:
+            print(f"  - {r}")
     
-    if not repos_to_process:
+    if not repos:
         print(f"No repos found for language: {args.language}")
         exit(1)
     
-    all_results = []
+    print(f"\n{'='*60}")
+    print(f"BUG GEN - {len(repos)} repos, {args.max_concurrent_tests} max concurrent")
+    print(f"{'='*60}\n")
     
-    # Single app.run() context for all repos - Modal handles parallelism on remote workers
     with app.run():
-        if not args.validate_only:
-            # Phase 1: Generate bugs for all repos IN PARALLEL
-            print(f"\n{'#'*60}")
-            print(f"# PHASE 1: BUG GENERATION ({len(repos_to_process)} repos) - PARALLEL")
-            print(f"{'#'*60}")
+        from swesmith.constants import ENV_NAME
+        
+        if args.validate_only:
+            print("MODE: Validation only\n")
+            print("Collecting patches...")
+            all_patches = collect_patches_from_files(repos)
+            print(f"\nTotal: {len(all_patches)} patches\n")
             
-            # Spawn all generation tasks at once (non-blocking)
-            spawn_results = []
-            for repo in repos_to_process:
-                spawn_results.append(
-                    spawn_generation_task(repo, args.max_bugs, args.interleave, args.max_entities, args.max_candidates)
-                )
+            results = run_validation_phase(all_patches, args.max_concurrent_tests, ENV_NAME)
+            if results:
+                print_summary(results, len(build_repos_with_patches(all_patches)))
+        
+        else:
+            print("MODE: Generation + Validation\n")
             
-            print(f"\nSpawned {len(spawn_results)} generation tasks. Waiting for results...")
+            generation_results = run_generation_phase(repos, args)
             
-            # Wait for all results and process them
-            generation_results = []
-            for repo_name, repo_id, handle_or_error in spawn_results:
-                if isinstance(handle_or_error, dict):
-                    # This was an error during spawn
-                    generation_results.append(handle_or_error)
-                else:
-                    # This is a FunctionCall handle - wait for result
-                    try:
-                        results = handle_or_error.get()  # Blocks until this task completes
-                        gen_result = process_generation_result(repo_name, repo_id, results)
-                        generation_results.append(gen_result)
-                    except Exception as e:
-                        generation_results.append({
-                            "repo": repo_name,
-                            "repo_id": repo_id,
-                            "error": f"Generation failed: {e}"
-                        })
-            
-            # Phase 2: Validate bugs for each repo that succeeded
             print(f"\n{'#'*60}")
             print(f"# PHASE 2: VALIDATION")
-            print(f"{'#'*60}")
+            print(f"{'#'*60}\n")
             
-            for gen_result in generation_results:
-                if "error" in gen_result:
-                    all_results.append(gen_result)
-                    continue
-                
-                patches = gen_result.get("patches", [])
-                if not patches:
-                    all_results.append({
-                        "repo": gen_result["repo"],
-                        "total_bugs": 0,
-                        "valid_bugs": 0
-                    })
-                    continue
-                
-                try:
-                    profile = resolve_profile(gen_result["repo"])
-                    val_result = process_single_repo_validation(
-                        gen_result["repo"],
-                        gen_result["repo_id"],
-                        patches,
-                        profile,
-                        modal_app=app
-                    )
-                    all_results.append(val_result)
-                except Exception as e:
-                    all_results.append({
-                        "repo": gen_result["repo"],
-                        "error": f"Validation failed: {e}"
-                    })
-        else:
-            # Validate-only mode
-            print(f"\n{'#'*60}")
-            print(f"# VALIDATION ONLY MODE")
-            print(f"{'#'*60}")
+            all_patches, errors = collect_patches_from_generation(generation_results)
+            results = run_validation_phase(all_patches, args.max_concurrent_tests, ENV_NAME)
             
-            for repo in repos_to_process:
-                try:
-                    profile = resolve_profile(repo)
-                    repo_id = profile.repo_name
-                    
-                    patches_file = Path(f"logs/bug_gen/{repo_id}_all_patches.json")
-                    if not patches_file.exists():
-                        all_results.append({
-                            "repo": repo,
-                            "error": f"Patches file {patches_file} not found"
-                        })
-                        continue
-                    
-                    with open(patches_file, "r") as f:
-                        patches = json.load(f)
-                    
-                    if not patches:
-                        all_results.append({
-                            "repo": repo,
-                            "total_bugs": 0,
-                            "valid_bugs": 0
-                        })
-                        continue
-                    
-                    val_result = process_single_repo_validation(
-                        repo, repo_id, patches, profile,
-                        modal_app=app
-                    )
-                    all_results.append(val_result)
-                except Exception as e:
-                    all_results.append({
-                        "repo": repo,
-                        "error": f"Failed: {e}"
-                    })
-    
-    # Print summary
-    print("\n" + "="*60)
-    print("SUMMARY")
-    print("="*60)
-    
-    total_bugs = 0
-    total_valid = 0
-    errors = []
-    
-    for result in all_results:
-        repo = result.get("repo", "unknown")
-        if "error" in result:
-            errors.append(f"{repo}: {result['error']}")
-        else:
-            bugs = result.get("total_bugs", 0)
-            valid = result.get("valid_bugs", 0)
-            total_bugs += bugs
-            total_valid += valid
-            print(f"{repo}: {valid}/{bugs} valid bugs")
-    
-    print(f"\nTotal: {total_valid}/{total_bugs} valid bugs across {len(repos_to_process)} repos")
-    
-    if errors:
-        print(f"\nErrors ({len(errors)}):")
-        for err in errors:
-            print(f"  - {err}")
+            if results:
+                print_summary(results, len(build_repos_with_patches(all_patches)))
+            
+            if errors:
+                print(f"\nGeneration Errors ({len(errors)}):")
+                for err in errors:
+                    print(f"  - {err['repo']}: {err.get('error', 'Unknown')}")
+
+
+if __name__ == "__main__":
+    main()
