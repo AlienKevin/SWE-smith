@@ -355,7 +355,7 @@ async def prebuild_validator_images_async(repos_with_patches: dict) -> dict[str,
     
     # Now run warmup sandboxes to force Modal to build all images
     async def warmup_all():
-        semaphore = asyncio.Semaphore(50)  # Limit concurrent builds
+        semaphore = asyncio.Semaphore(100)  # Limit concurrent builds
         
         async def warmup_image(img_name: str) -> tuple[str, bool, str]:
             """Run a simple command to force image build."""
@@ -404,56 +404,51 @@ LOGS_MOUNT_PATH = "/logs"  # Where the volume is mounted in Modal containers
 # Volume I/O Helpers
 # ============================================================================
 
-def volume_write_text(path: str, content: str) -> None:
+async def volume_write_text(path: str, content: str) -> None:
     """Write text content to a path on the Modal Volume."""
-    import tempfile
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-        f.write(content)
-        temp_path = f.name
-    # Upload after temp file is closed but still exists
-    with logs_volume.batch_upload() as batch:
-        batch.put_file(temp_path, path)
-    # Delete only after upload completes
-    Path(temp_path).unlink()
+    import io
+    def _write():
+        with logs_volume.batch_upload() as batch:
+            batch.put_file(io.BytesIO(content.encode("utf-8")), path)
+
+    await asyncio.to_thread(_write)
 
 
-def volume_write_bytes(path: str, content: bytes) -> None:
+async def volume_write_bytes(path: str, content: bytes) -> None:
     """Write binary content to a path on the Modal Volume."""
-    import tempfile
-    with tempfile.NamedTemporaryFile(mode='wb', suffix='.bin', delete=False) as f:
-        f.write(content)
-        temp_path = f.name
-    # Upload after temp file is closed but still exists
-    with logs_volume.batch_upload() as batch:
-        batch.put_file(temp_path, path)
-    # Delete only after upload completes
-    Path(temp_path).unlink()
+    import io
+    def _write():
+        with logs_volume.batch_upload() as batch:
+            batch.put_file(io.BytesIO(content), path)
+
+    await asyncio.to_thread(_write)
 
 
-def volume_read_text(path: str) -> str | None:
+async def volume_read_text(path: str) -> str | None:
     """Read text content from the Modal Volume. Returns None if file doesn't exist."""
     try:
-        data = b"".join(logs_volume.read_file(path))
-        return data.decode("utf-8")
+        chunks = []
+        async for chunk in logs_volume.read_file.aio(path):
+            chunks.append(chunk)
+        return b"".join(chunks).decode("utf-8")
     except Exception:
         return None
 
 
-def volume_file_exists(path: str) -> bool:
+async def volume_file_exists(path: str) -> bool:
     """Check if a file exists on the Modal Volume."""
     try:
-        # Try to read a small portion - if it fails, file doesn't exist
-        for _ in logs_volume.read_file(path):
-            return True
+        # listdir is much faster than reading the file as it only fetches metadata
+        await logs_volume.listdir.aio(path)
         return True
     except Exception:
         return False
 
 
-def volume_list_dir(path: str) -> list[str]:
+async def volume_list_dir(path: str) -> list[str]:
     """List files/directories in a path on the Modal Volume."""
     try:
-        entries = list(logs_volume.listdir(path))
+        entries = await logs_volume.listdir.aio(path)
         return [e.path for e in entries]
     except Exception:
         return []
@@ -748,7 +743,7 @@ async def run_validation_in_sandbox(
 # Generation Phase (using Modal .map() for true parallel processing)
 # ============================================================================
 
-def run_generation_phase(repos: list[str], args, language: str) -> list[dict]:
+async def run_generation_phase(repos: list[str], args, language: str) -> list[dict]:
     """Run bug generation for all repos in parallel using Modal .map().
     
     Uses Modal's .map() for true parallel processing with autoscaling workers.
@@ -774,40 +769,48 @@ def run_generation_phase(repos: list[str], args, language: str) -> list[dict]:
         except Exception as e:
             failed_to_resolve.append({"repo": repo, "repo_id": None, "error": f"Failed to resolve profile: {e}"})
     
-    # Parallelize volume existence checks using ThreadPoolExecutor
+    # Parallelize volume existence checks using asyncio
     # Each repo needs 3 checks: done.txt, error.txt, patches.json
-    from concurrent.futures import ThreadPoolExecutor, as_completed
     
-    def check_repo_status(repo_tuple: tuple[str, str]) -> tuple[str, str, str]:
+    async def check_repo_status(repo_tuple: tuple[str, str]) -> tuple[str, str, str]:
         """Check if a repo is already processed. Returns (repo, repo_id, status)."""
         repo, repo_id = repo_tuple
         volume_bug_dir = f"{language}/bug_gen/{repo_id}"
         
-        if volume_file_exists(f"{volume_bug_dir}/done.txt"):
+        if await volume_file_exists(f"{volume_bug_dir}/done.txt"):
             return (repo, repo_id, "done")
-        elif volume_file_exists(f"{volume_bug_dir}/error.txt"):
+        elif await volume_file_exists(f"{volume_bug_dir}/error.txt"):
             return (repo, repo_id, "error")
-        elif volume_file_exists(f"{language}/bug_gen/{repo_id}_all_patches.json"):
+        elif await volume_file_exists(f"{language}/bug_gen/{repo_id}_all_patches.json"):
             return (repo, repo_id, "patches_exist")
         else:
             return (repo, repo_id, "pending")
     
     print(f"  Checking {len(resolved_repos)} repos for existing results (parallel)...")
-    with ThreadPoolExecutor(max_workers=min(50, len(resolved_repos) or 1)) as executor:
-        futures = {executor.submit(check_repo_status, rt): rt for rt in resolved_repos}
-        for future in as_completed(futures):
-            repo, repo_id, status = future.result()
-            if status == "done":
-                print(f"  Skipping {repo}: already completed")
-                skipped_done += 1
-            elif status == "error":
-                print(f"  Skipping {repo}: previously failed")
-                skipped_error += 1
-            elif status == "patches_exist":
-                print(f"  Skipping {repo}: patches already exist")
-                skipped_done += 1
-            else:
-                repo_inputs.append((repo, repo_id))
+    
+    semaphore = asyncio.Semaphore(100)
+    async def check_with_sem(repo_tuple):
+        async with semaphore:
+            return await check_repo_status(repo_tuple)
+            
+    tasks = [check_with_sem(rt) for rt in resolved_repos]
+    if tasks:
+        results = await asyncio.gather(*tasks)
+    else:
+        results = []
+        
+    for repo, repo_id, status in results:
+        if status == "done":
+            print(f"  Skipping {repo}: already completed")
+            skipped_done += 1
+        elif status == "error":
+            print(f"  Skipping {repo}: previously failed")
+            skipped_error += 1
+        elif status == "patches_exist":
+            print(f"  Skipping {repo}: patches already exist")
+            skipped_done += 1
+        else:
+            repo_inputs.append((repo, repo_id))
     
     if skipped_done or skipped_error:
         print(f"\nSkipped {skipped_done} completed, {skipped_error} failed repos\n")
@@ -876,10 +879,9 @@ def annotate_patches(patches: list, repo: str, repo_id: str, profile, language: 
     return patches
 
 
-def collect_patches_from_files(repos: list[str], language: str) -> list[dict]:
+async def collect_patches_from_files(repos: list[str], language: str) -> list[dict]:
     """Collect patches from Modal Volume for validate-only mode."""
     import re
-    from concurrent.futures import ThreadPoolExecutor, as_completed
     
     all_patches = []
     
@@ -891,22 +893,22 @@ def collect_patches_from_files(repos: list[str], language: str) -> list[dict]:
             resolved_repos.append((repo, profile.repo_name, profile))
         except Exception:
             print(f"  Skipping {repo}: profile not found")
-    
-    def check_and_load_repo(repo_tuple: tuple) -> tuple:
+
+    async def check_and_load_repo(repo_tuple: tuple) -> tuple:
         """Check repo status and load patches if valid. Returns (repo, repo_id, profile, status, patches_json)."""
         repo, repo_id, profile = repo_tuple
         bug_gen_dir = f"{language}/bug_gen/{repo_id}"
         
         # 1. Check if validation previously failed (broken baseline)
-        if volume_file_exists(f"{language}/run_validation/{repo_id}/{repo_id}.ref/error.txt"):
+        if await volume_file_exists(f"{language}/run_validation/{repo_id}/{repo_id}.ref/error.txt"):
             return (repo, repo_id, profile, "validation_failed", None)
             
         # 2. Check if generation failed
-        if volume_file_exists(f"{bug_gen_dir}/error.txt"):
+        if await volume_file_exists(f"{bug_gen_dir}/error.txt"):
             return (repo, repo_id, profile, "generation_failed", None)
             
         # 3. Check patch count from done.txt to avoid reading large files for small repos
-        done_content = volume_read_text(f"{bug_gen_dir}/done.txt")
+        done_content = await volume_read_text(f"{bug_gen_dir}/done.txt")
         if done_content:
             match = re.search(r"completed: (\d+) bugs", done_content)
             if match:
@@ -916,7 +918,7 @@ def collect_patches_from_files(repos: list[str], language: str) -> list[dict]:
         
         # 4. Read patches
         patches_path = f"{language}/bug_gen/{repo_id}_all_patches.json"
-        patches_json = volume_read_text(patches_path)
+        patches_json = await volume_read_text(patches_path)
         
         if patches_json:
             return (repo, repo_id, profile, "ok", patches_json)
@@ -924,24 +926,32 @@ def collect_patches_from_files(repos: list[str], language: str) -> list[dict]:
             return (repo, repo_id, profile, "no_patches_file", None)
     
     print(f"  Checking {len(resolved_repos)} repos for patches (parallel)...")
-    with ThreadPoolExecutor(max_workers=min(50, len(resolved_repos) or 1)) as executor:
-        futures = {executor.submit(check_and_load_repo, rt): rt for rt in resolved_repos}
-        for future in as_completed(futures):
-            repo, repo_id, profile, status, patches_json = future.result()
+    
+    semaphore = asyncio.Semaphore(100)
+    async def check_with_sem(rt):
+        async with semaphore:
+            return await check_and_load_repo(rt)
             
-            if status == "validation_failed":
-                print(f"  Skipping {repo}: validation previously failed (pre-gold)")
-            elif status == "generation_failed":
-                print(f"  Skipping {repo}: bug generation failed")
-            elif status.startswith("too_few_patches:"):
-                count = status.split(":")[1]
-                print(f"  Skipping {repo}: too few patches ({count} < {MIN_PATCHES_FOR_VALIDATION})")
-            elif status == "no_patches_file":
-                print(f"  Skipping {repo}: no patches file")
-            elif status == "ok" and patches_json:
-                patches = json.loads(patches_json)
-                all_patches.extend(annotate_patches(patches, repo, repo_id, profile, language))
-                print(f"  {repo}: {len(patches)} patches")
+    tasks = [check_with_sem(rt) for rt in resolved_repos]
+    if tasks:
+        results = await asyncio.gather(*tasks)
+    else:
+        results = []
+        
+    for repo, repo_id, profile, status, patches_json in results:
+        if status == "validation_failed":
+            print(f"  Skipping {repo}: validation previously failed (pre-gold)")
+        elif status == "generation_failed":
+            print(f"  Skipping {repo}: bug generation failed")
+        elif status.startswith("too_few_patches:"):
+            count = status.split(":")[1]
+            print(f"  Skipping {repo}: too few patches ({count} < {MIN_PATCHES_FOR_VALIDATION})")
+        elif status == "no_patches_file":
+            print(f"  Skipping {repo}: no patches file")
+        elif status == "ok" and patches_json:
+            patches = json.loads(patches_json)
+            all_patches.extend(annotate_patches(patches, repo, repo_id, profile, language))
+            print(f"  {repo}: {len(patches)} patches")
     
     return all_patches
 
@@ -982,18 +992,17 @@ async def run_pregold_phase_async(repos_with_patches: dict, max_concurrent: int,
     tasks = []
     previously_failed = set()  # Repos that failed in previous runs
     
-    # Parallelize volume existence checks
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    # Parallelize volume existence checks using asyncio
     
-    def check_baseline_status(repo_info_tuple: tuple) -> tuple[str, dict, str]:
+    async def check_baseline_status(repo_info_tuple: tuple) -> tuple[str, dict, str]:
         """Check if baseline exists or failed. Returns (repo, info, status)."""
         repo, info = repo_info_tuple
         lang = info["language"]
         baseline_output_path = f"{lang}/run_validation/{info['repo_id']}/{info['repo_id']}.ref/test_output.txt"
         error_path = f"{lang}/run_validation/{info['repo_id']}/{info['repo_id']}.ref/error.txt"
         
-        test_output_exists = volume_file_exists(baseline_output_path)
-        error_exists = volume_file_exists(error_path)
+        test_output_exists = await volume_file_exists(baseline_output_path)
+        error_exists = await volume_file_exists(error_path)
         
         if test_output_exists and not error_exists:
             return (repo, info, "exists")
@@ -1003,21 +1012,30 @@ async def run_pregold_phase_async(repos_with_patches: dict, max_concurrent: int,
             return (repo, info, "pending")
     
     print(f"  Checking {len(repos_with_patches)} baselines for existing results (parallel)...")
-    with ThreadPoolExecutor(max_workers=min(50, len(repos_with_patches) or 1)) as executor:
-        futures = {executor.submit(check_baseline_status, (repo, info)): repo for repo, info in repos_with_patches.items()}
-        for future in as_completed(futures):
-            repo, info, status = future.result()
-            if status == "exists":
-                print(f"  Skipping {repo}: baseline exists")
-            elif status == "failed":
-                print(f"  Skipping {repo}: previously failed")
-                previously_failed.add(repo)
-            else:
-                tasks.append({
-                    "repo": repo, "repo_id": info["repo_id"], "profile": info["profile"],
-                    "instance_id": f"{info['repo_id']}.ref", "workdir": f"/{env_name}",
-                    "language": info["language"]
-                })
+    
+    semaphore = asyncio.Semaphore(100)
+    async def check_with_sem(item):
+        async with semaphore:
+            return await check_baseline_status(item)
+            
+    check_tasks = [check_with_sem((repo, info)) for repo, info in repos_with_patches.items()]
+    if check_tasks:
+        results = await asyncio.gather(*check_tasks)
+    else:
+        results = []
+        
+    for repo, info, status in results:
+        if status == "exists":
+            print(f"  Skipping {repo}: baseline exists")
+        elif status == "failed":
+            print(f"  Skipping {repo}: previously failed")
+            previously_failed.add(repo)
+        else:
+            tasks.append({
+                "repo": repo, "repo_id": info["repo_id"], "profile": info["profile"],
+                "instance_id": f"{info['repo_id']}.ref", "workdir": f"/{env_name}",
+                "language": info["language"]
+            })
     
     if not tasks:
         print("  All baselines already exist!\\n")
@@ -1057,7 +1075,7 @@ async def run_pregold_phase_async(repos_with_patches: dict, max_concurrent: int,
         try:
             if "error" not in result:
                 # Save output to volume
-                volume_write_text(f"{volume_baseline_dir}/test_output.txt", result["output"])
+                await volume_write_text(f"{volume_baseline_dir}/test_output.txt", result["output"])
                 
                 # Validate baseline has at least 1 passing test (use temp file for parsing)
                 try:
@@ -1073,7 +1091,7 @@ async def run_pregold_phase_async(repos_with_patches: dict, max_concurrent: int,
                         if passed == 0:
                             status = f"⚠️ 0 tests passed (skipping post-gold)"
                             failed_repos.add(task["repo"])
-                            volume_write_text(f"{volume_baseline_dir}/error.txt", "Pre-gold failed: 0 tests passed")
+                            await volume_write_text(f"{volume_baseline_dir}/error.txt", "Pre-gold failed: 0 tests passed")
                         else:
                             status = f"OK ({passed} tests passed)"
                     else:
@@ -1091,18 +1109,18 @@ async def run_pregold_phase_async(repos_with_patches: dict, max_concurrent: int,
                             reason = "unknown"
                         status = f"⚠️ {reason} (skipping post-gold)"
                         failed_repos.add(task["repo"])
-                        volume_write_text(f"{volume_baseline_dir}/error.txt", f"Pre-gold failed: {reason}")
+                        await volume_write_text(f"{volume_baseline_dir}/error.txt", f"Pre-gold failed: {reason}")
                 except Exception as e:
                     status = f"OK (parse check failed: {e})"
             else:
                 status = f"ERROR: {result['error'][:50]}"
                 failed_repos.add(task["repo"])
-                volume_write_text(f"{volume_baseline_dir}/error.txt", f"Pre-gold sandbox error: {result['error']}")
+                await volume_write_text(f"{volume_baseline_dir}/error.txt", f"Pre-gold sandbox error: {result['error']}")
         except Exception as e:
             status = f"EXCEPTION: {e}"
             failed_repos.add(task["repo"])
             try:
-                volume_write_text(f"{volume_baseline_dir}/error.txt", f"Pre-gold exception: {e}")
+                await volume_write_text(f"{volume_baseline_dir}/error.txt", f"Pre-gold exception: {e}")
             except:
                 pass
         print(f"  [{completed}/{len(tasks)}] {task['repo']}: {status}")
@@ -1131,27 +1149,33 @@ async def run_postgold_phase_async(all_patches: list, max_concurrent: int, env_n
     print(f"PHASE: POST-GOLD TESTS")
     print(f"Running {len(all_patches)} patches, max concurrent: {max_concurrent}")
     
-    # Parallelize volume existence checks to avoid slow sequential roundtrips
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    # Parallelize volume existence checks to avoid slow sequential roundtrips using asyncio
 
-    def check_patch_completion(p):
+    async def check_patch_completion(p):
         path = f"{p['_language']}/run_validation/{p['_repo_id']}/{p['instance_id']}/report.json"
-        return p, volume_file_exists(path)
+        return p, await volume_file_exists(path)
 
     print(f"  Checking {len(all_patches)} patches for existing results (parallel)...")
     tasks = []
     
-    with ThreadPoolExecutor(max_workers=min(1000, len(all_patches) or 1)) as executor:
-        futures = {executor.submit(check_patch_completion, p): p for p in all_patches}
+    checkout_sem = asyncio.Semaphore(100) # Limit concurrent checks against volume
+    async def check_with_sem(p):
+        async with checkout_sem:
+            return await check_patch_completion(p)
+    
+    check_tasks = [check_with_sem(p) for p in all_patches]
+    if check_tasks:
+        results = await asyncio.gather(*check_tasks)
+    else:
+        results = []
         
-        for future in as_completed(futures):
-            p, exists = future.result()
-            if not exists:
-                tasks.append({
-                    "repo": p["_repo"], "repo_id": p["_repo_id"], "profile": p["_profile"],
-                    "instance_id": p["instance_id"], "patch": p["patch"],
-                    "workdir": f"/{env_name}", "full_patch": p
-                })
+    for p, exists in results:
+        if not exists:
+            tasks.append({
+                "repo": p["_repo"], "repo_id": p["_repo_id"], "profile": p["_profile"],
+                "instance_id": p["instance_id"], "patch": p["patch"],
+                "workdir": f"/{env_name}", "full_patch": p
+            })
     
     print(f"  {len(all_patches) - len(tasks)} already validated, {len(tasks)} remaining")
     
@@ -1359,7 +1383,7 @@ async def main(
     args.max_candidates = max_candidates
     
     # Phase 1: Generation (skips repos that are already done/failed)
-    generation_results = run_generation_phase(target_repos, args, language)
+    generation_results = await run_generation_phase(target_repos, args, language)
     
     # Phase 2: Validation - collect ALL patches from volume (not just from this run)
     print(f"\n{'#'*60}")
@@ -1367,7 +1391,7 @@ async def main(
     print(f"{'#'*60}\n")
     
     print("Collecting patches from volume...")
-    all_patches = collect_patches_from_files(target_repos, language)
+    all_patches = await collect_patches_from_files(target_repos, language)
     print(f"Total: {len(all_patches)} patches\n")
     
     results = await run_validation_phase_async(all_patches, max_concurrent_tests, ENV_NAME)
