@@ -136,6 +136,107 @@ TEST_OUTPUT_END = ">>>>> End Test Output"
 PREGOLD_TIMEOUT = 200  # seconds - skip post-gold if baseline exceeds this
 MIN_PATCHES_FOR_VALIDATION = 50  # skip repos with fewer patches
 
+REMOTE_VALIDATOR_SCRIPT = r"""
+import sys
+import json
+import subprocess
+import os
+from pathlib import Path
+
+# We need to make sure we can import these. 
+# The image sets PYTHONPATH=/root, and swesmith is at /root/swesmith
+if "/root" not in sys.path:
+    sys.path.append("/root")
+
+from swesmith.harness.grading import get_valid_report
+from swesmith.constants import TEST_OUTPUT_START, TEST_OUTPUT_END
+
+def main():
+    try:
+        config_path = sys.argv[1]
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        
+        test_cmd = config['test_cmd']
+        output_path = Path(config['output_path'])
+        baseline_path = Path(config['baseline_path'])
+        report_path = Path(config['report_path'])
+        instance = config['instance']
+        
+        # Ensure output directory exists (it's on a volume mount)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Run test command
+        print(f"Executing test: {test_cmd}")
+        
+        full_cmd = f"set -uxo pipefail; : '{TEST_OUTPUT_START}'; {test_cmd} || true; : '{TEST_OUTPUT_END}'"
+        
+        # execution
+        proc = subprocess.run(
+            full_cmd,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            executable="/bin/bash"
+        )
+        
+        output_bytes = proc.stdout
+        exit_code = proc.returncode
+        
+        # Decode
+        output_str = output_bytes.decode('utf-8', errors='replace')
+        
+        # Write output to volume
+        output_path.write_text(output_str, encoding='utf-8')
+        print(f"Saved output to {output_path}")
+        
+        result_summary = {
+            "instance_id": instance.get("instance_id"),
+            "valid": False,
+            "error": None,
+            "exit_code": exit_code
+        }
+
+        # Check baseline and validate
+        if baseline_path.exists():
+            print(f"Baseline found at {baseline_path}, validating...")
+            try:
+                report = get_valid_report(
+                    val_pregold_path=str(baseline_path),
+                    val_postgold_path=str(output_path),
+                    instance=instance
+                )
+                
+                report_path.write_text(json.dumps(report, indent=4))
+                print(f"Saved report to {report_path}")
+                
+                if len(report.get("PASS_TO_FAIL", [])) > 0:
+                    result_summary["valid"] = True
+                    print("Validation SUCCESS: Found PASS_TO_FAIL")
+                else:
+                    print("Validation result: No PASS_TO_FAIL")
+                    
+            except Exception as e:
+                print(f"Validation error: {e}")
+                result_summary["error"] = f"Grading error: {str(e)}"
+        else:
+            print(f"Baseline NOT found at {baseline_path}")
+            result_summary["error"] = "Baseline not found"
+            
+        # Output result as JSON marked with special tags
+        print(f"\n<<RESULT_JSON>>{json.dumps(result_summary)}<<RESULT_JSON>>")
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        # Fallback error result
+        res = {"valid": False, "error": str(e)}
+        print(f"\n<<RESULT_JSON>>{json.dumps(res)}<<RESULT_JSON>>")
+
+if __name__ == "__main__":
+    main()
+"""
+
 # ============================================================================
 # Profile & Repo Utilities
 # ============================================================================
@@ -186,19 +287,15 @@ generator_image = (
     .add_local_file(".env", remote_path="/root/.env")
 )
 
-_validator_image_cache: dict[str, modal.Image] = {}
-
-
 def get_validator_image(image_name: str) -> modal.Image:
     """Get or create a validator image for the given Docker image name."""
-    if image_name not in _validator_image_cache:
-        _validator_image_cache[image_name] = (
-            modal.Image.from_registry(image_name, add_python="3.11")
-            .pip_install_from_pyproject("pyproject.toml", optional_dependencies=["validate"])
-            .env({"PYTHONPATH": "/root"})
-            .add_local_dir("swesmith", remote_path="/root/swesmith")
-        )
-    return _validator_image_cache[image_name]
+    print(f"DEBUG: get_validator_image called for {image_name}")
+    return (
+        modal.Image.from_registry(image_name, add_python="3.11")
+        .pip_install_from_pyproject("pyproject.toml", optional_dependencies=["validate"])
+        .env({"PYTHONPATH": "/root"})
+        .add_local_dir("swesmith", remote_path="/root/swesmith")
+    )
 
 
 app = modal.App(APP_NAME)
@@ -279,7 +376,7 @@ def volume_list_dir(path: str) -> list[str]:
 def generate_bugs_remote(
     repo_name: str, max_bugs: int, interleave: bool,
     max_entities: int, max_candidates: int, language: str,
-    timeout_buffer_seconds: int = 15
+    timeout_buffer_seconds: int = 60
 ) -> dict:
     """Generate bugs for a repository on a remote Modal worker.
     
@@ -386,10 +483,12 @@ def generate_bugs_remote(
             
             # Mark as done
             (volume_bug_dir / "done.txt").write_text(f"Generation completed: {len(patches)} bugs generated")
+            logs_volume.commit()  # Force internal commit to persist done.txt immediately
             return {"total_bugs": len(patches), "patches": patches}
         else:
             print(f"Patches file not found. Available: {[p.name for p in logs_base.iterdir()]}")
             (volume_bug_dir / "error.txt").write_text("No patches_json generated")
+            logs_volume.commit()
             return {"error": "No patches_json generated"}
 
     soft_timeout = MODAL_TIMEOUT - timeout_buffer_seconds
@@ -443,20 +542,19 @@ def generate_bugs_remote(
 # ============================================================================
 async def run_validation_in_sandbox(
     semaphore: asyncio.Semaphore, app: modal.App, image_name: str, instance_id: str,
-    test_cmd: str, workdir: str, patch: str | None, timeout: int
+    test_cmd: str, workdir: str, patch: str | None, timeout: int,
+    postgold_config: dict | None = None
 ) -> dict:
     """
     Run validation in a Modal Sandbox with a specific Docker image.
     
-    Uses Modal's native async APIs:
-    - Sandbox.create.aio() - async sandbox creation
-    - process.stdout.read.aio() - async output reading  
-    - process.wait.aio() - async wait for completion
-    - sb.terminate.aio() - async cleanup
+    If postgold_config is provided, runs the remote validator script and returns
+    summary metadata. Results are written directly to the volume.
     
-    This is pure async I/O with zero thread overhead.
+    If postgold_config is None, runs generic test cmd and returns output.
     """
     async with semaphore:
+        print(f"[{instance_id}] Getting validator image ({image_name})...")
         validator_image = get_validator_image(image_name)
         
         script_lines = [
@@ -471,25 +569,76 @@ async def run_validation_in_sandbox(
                 f"git apply /tmp/{instance_id}.diff",
             ])
         
-        script_lines.extend([
-            f": '{TEST_OUTPUT_START}'",
-            f"{test_cmd} || true",
-            f": '{TEST_OUTPUT_END}'",
-        ])
+        # Prepare Sandbox arguments
+        sandbox_kwargs = {
+            "app": app,
+            "image": validator_image,
+            "timeout": timeout,
+        }
+        
+        if postgold_config:
+            # Mount logs volume for direct writing
+            sandbox_kwargs["volumes"] = {LOGS_MOUNT_PATH: logs_volume}
+            
+            # Write config and validator script
+            config_json = json.dumps(postgold_config)
+            script_lines.extend([
+                f"cat > /tmp/config.json << 'CONFIG_EOF'",
+                config_json, "CONFIG_EOF",
+                f"cat > /tmp/validator.py << 'SCRIPT_EOF'",
+                REMOTE_VALIDATOR_SCRIPT, "SCRIPT_EOF",
+                f"python3 /tmp/validator.py /tmp/config.json"
+            ])
+        else:
+            # Legacy/Pregold mode: just run test
+            script_lines.extend([
+                f": '{TEST_OUTPUT_START}'",
+                f"{test_cmd} || true",
+                f": '{TEST_OUTPUT_END}'",
+            ])
         
         try:
             # Use Modal's native async APIs
-            sb = await modal.Sandbox.create.aio(app=app, image=validator_image, timeout=timeout)
+            print(f"[{instance_id}] Creating sandbox...")
+            sb = await modal.Sandbox.create.aio(**sandbox_kwargs)
+            
+            print(f"[{instance_id}] Executing script...")
             process = await sb.exec.aio("bash", "-c", "\n".join(script_lines))
+            
             try:
+                print(f"[{instance_id}] Reading stdout...")
                 output_raw = await process.stdout.read.aio()
             except UnicodeDecodeError as e:
                 return {"instance_id": instance_id, "error": f"Binary output (decode failed at pos {e.start})"}
+            
+            print(f"[{instance_id}] Waiting for exit code...")
             exit_code = await process.wait.aio()
+            
+            print(f"[{instance_id}] Terminating sandbox...")
             await sb.terminate.aio()
             
             output = output_raw.decode("utf-8", errors="replace") if isinstance(output_raw, bytes) else output_raw
-            return {"instance_id": instance_id, "output": output, "exit_code": exit_code}
+            print(f'{output=}')
+            
+            if postgold_config:
+                # Parse JSON result from output
+                if "<<RESULT_JSON>>" in output:
+                    try:
+                        json_str = output.split("<<RESULT_JSON>>")[1]
+                        result = json.loads(json_str)
+                        # Ensure error is propagated if script failed but printed JSON
+                        if result.get("exit_code", 0) != 0 and not result.get("error"):
+                            # This usually shouldn't happen with our script unless test failed (which is normal)
+                             # But let's trust the 'valid' flag and 'error' field
+                             pass
+                        return result
+                    except Exception as e:
+                        return {"instance_id": instance_id, "error": f"Failed to parse remote result: {e}", "raw_output": output}
+                else:
+                     return {"instance_id": instance_id, "error": "No remote result found", "raw_output": output}
+            else:
+                return {"instance_id": instance_id, "output": output, "exit_code": exit_code}
+                
         except UnicodeDecodeError as e:
             return {"instance_id": instance_id, "error": f"Binary output (decode failed at pos {e.start})"}
         except Exception as e:
@@ -612,7 +761,9 @@ def annotate_patches(patches: list, repo: str, repo_id: str, profile, language: 
 
 def collect_patches_from_files(repos: list[str], language: str) -> list[dict]:
     """Collect patches from Modal Volume for validate-only mode."""
+    import re
     all_patches = []
+    
     for repo in repos:
         try:
             profile = resolve_profile(repo)
@@ -621,8 +772,32 @@ def collect_patches_from_files(repos: list[str], language: str) -> list[dict]:
             continue
 
         repo_id = profile.repo_name
+        
+        # 1. Check if validation previously failed (broken baseline)
+        if volume_file_exists(f"{language}/run_validation/{repo_id}/{repo_id}.ref/error.txt"):
+            print(f"  Skipping {repo}: validation previously failed (pre-gold)")
+            continue
+            
+        # 2. Check if generation failed
+        bug_gen_dir = f"{language}/bug_gen/{repo_id}"
+        if volume_file_exists(f"{bug_gen_dir}/error.txt"):
+            print(f"  Skipping {repo}: bug generation failed")
+            continue
+            
+        # 3. Check patch count from done.txt to avoid reading large files for small repos
+        done_content = volume_read_text(f"{bug_gen_dir}/done.txt")
+        if done_content:
+            match = re.search(r"completed: (\d+) bugs", done_content)
+            if match:
+                count = int(match.group(1))
+                if count < MIN_PATCHES_FOR_VALIDATION:
+                    print(f"  Skipping {repo}: too few patches ({count} < {MIN_PATCHES_FOR_VALIDATION})")
+                    continue
+        
+        # 4. Read patches
         patches_path = f"{language}/bug_gen/{repo_id}_all_patches.json"
         patches_json = volume_read_text(patches_path)
+        
         if patches_json:
             patches = json.loads(patches_json)
             all_patches.extend(annotate_patches(patches, repo, repo_id, profile, language))
@@ -654,54 +829,6 @@ def build_repos_with_patches(all_patches: list) -> dict:
         if repo not in repos:
             repos[repo] = {"profile": p["_profile"], "repo_id": p["_repo_id"], "language": p["_language"]}
     return repos
-
-
-def process_postgold_result(task: dict, result: dict, get_valid_report) -> dict:
-    """Process a single post-gold test result and save to Modal Volume."""
-    import tempfile
-    
-    instance_id, repo, repo_id = task["instance_id"], task["repo"], task["repo_id"]
-    language = task["full_patch"]["_language"]
-    volume_log_dir = f"{language}/run_validation/{repo_id}/{instance_id}"
-    
-    if "error" in result:
-        return {"instance_id": instance_id, "repo": repo, "error": result["error"], "valid": False}
-    
-    # Save output to volume
-    volume_write_text(f"{volume_log_dir}/test_output.txt", result["output"])
-    
-    # Check baseline exists
-    baseline_path = f"{language}/run_validation/{repo_id}/{repo_id}.ref/test_output.txt"
-    baseline_content = volume_read_text(baseline_path)
-    if not baseline_content:
-        return {"instance_id": instance_id, "repo": repo, "error": "Baseline not found", "valid": False}
-    
-    # Grade using temp files (get_valid_report requires file paths)
-    try:
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f_pre:
-            f_pre.write(baseline_content)
-            pre_path = f_pre.name
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f_post:
-            f_post.write(result["output"])
-            post_path = f_post.name
-        
-        report = get_valid_report(
-            val_pregold_path=pre_path,
-            val_postgold_path=post_path,
-            instance=task["full_patch"]
-        )
-        
-        # Cleanup temp files
-        Path(pre_path).unlink()
-        Path(post_path).unlink()
-        
-        # Save report to volume
-        volume_write_text(f"{volume_log_dir}/report.json", json.dumps(report, indent=4))
-        
-        is_valid = len(report.get("PASS_TO_FAIL", [])) > 0
-        return {"instance_id": instance_id, "repo": repo, "valid": is_valid}
-    except Exception as e:
-        return {"instance_id": instance_id, "repo": repo, "error": f"Grading error: {e}", "valid": False}
 
 
 async def run_pregold_phase_async(repos_with_patches: dict, max_concurrent: int, env_name: str) -> set[str]:
@@ -873,11 +1000,27 @@ async def run_postgold_phase_async(all_patches: list, max_concurrent: int, env_n
     
     async def process_single_task(task: dict) -> dict:
         """Process a single validation task."""
+        lang = task["full_patch"]["_language"]
+        repo_id = task["repo_id"]
+        instance_id = task["instance_id"]
+        
+        # Strip internal keys (prefixed with _) that contain non-serializable objects like the profile
+        serializable_patch = {k: v for k, v in task["full_patch"].items() if not k.startswith("_")}
+        
+        postgold_config = {
+            "test_cmd": task["profile"].test_cmd,
+            "output_path": f"/logs/{lang}/run_validation/{repo_id}/{instance_id}/test_output.txt",
+            "baseline_path": f"/logs/{lang}/run_validation/{repo_id}/{repo_id}.ref/test_output.txt",
+            "report_path": f"/logs/{lang}/run_validation/{repo_id}/{instance_id}/report.json",
+            "instance": serializable_patch
+        }
+        
         result = await run_validation_in_sandbox(
             semaphore=semaphore, app=app,
             image_name=task["profile"].image_name, instance_id=task["instance_id"],
             test_cmd=task["profile"].test_cmd, workdir=task["workdir"],
-            patch=task["patch"], timeout=task["profile"].timeout
+            patch=task["patch"], timeout=task["profile"].timeout,
+            postgold_config=postgold_config
         )
         return (task, result)
     
@@ -894,10 +1037,9 @@ async def run_postgold_phase_async(all_patches: list, max_concurrent: int, env_n
         task, result = await coro
         completed += 1
         
-        try:
-            processed = process_postgold_result(task, result, get_valid_report)
-        except Exception as e:
-            processed = {"instance_id": task["instance_id"], "repo": task["repo"], "error": str(e), "valid": False}
+        processed = result
+        processed["repo"] = task["repo"]
+        # result already has instance_id, valid, error keys from the sandbox return
         
         results.append(processed)
         if processed.get("valid"):
@@ -1018,6 +1160,11 @@ def main(
         target_repos = repo_list
     else:
         target_repos = get_repos_for_language(language)
+        
+        # Skip problematic repos
+        ignored_map = ["mrdoob/three.js", "riot/riot"]
+        target_repos = [r for r in target_repos if r not in ignored_map]
+        
         print(f"Found {len(target_repos)} repos for '{language}':")
         for r in target_repos:
             print(f"  - {r}")

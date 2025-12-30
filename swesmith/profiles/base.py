@@ -20,7 +20,8 @@ from functools import cached_property
 from ghapi.all import GhApi
 from multiprocessing import Lock
 from pathlib import Path
-from swesmith.bug_gen.adapters import get_entities_from_file, SUPPORTED_EXTS
+# Note: swesmith.bug_gen.adapters is imported lazily in extract_entities() to avoid
+# loading tree-sitter dependencies when only using Registry/get_valid_report
 from swebench.harness.constants import (
     DOCKER_USER,
     DOCKER_WORKDIR,
@@ -64,7 +65,7 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
     org_gh: str = ORG_NAME_GH
     arch: str = "x86_64"
     pltf: str = "linux/x86_64"
-    exts: list[str] = field(default_factory=lambda: SUPPORTED_EXTS)
+    exts: list[str] = field(default_factory=list)  # Set by extract_entities if not provided
     eval_sets: set[str] = field(default_factory=set)
 
     # Install + Test specifications
@@ -306,6 +307,12 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
         Returns:
             List[CodeEntity]: List of CodeEntity objects containing entity information.
         """
+        # Lazy import to avoid loading tree-sitter dependencies when not needed
+        from swesmith.bug_gen.adapters import get_entities_from_file, SUPPORTED_EXTS
+        
+        # Use SUPPORTED_EXTS if exts was not explicitly set
+        exts = self.exts if self.exts else SUPPORTED_EXTS
+        
         dir_path, cloned = self.clone()
         entities = []
         for root, _, files in os.walk(dir_path):
@@ -325,7 +332,7 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
                     continue
 
                 file_ext = Path(file_path).suffix
-                if file_ext not in self.exts:
+                if file_ext not in exts:
                     continue
                 get_entities_from_file[file_ext](entities, file_path, max_entities)
         if cloned:

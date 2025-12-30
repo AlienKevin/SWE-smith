@@ -73,6 +73,7 @@ validate = [
     "ghapi",
     "python-dotenv",
     "rich",
+    "swebench",
     "unidiff",
     "tqdm",
 ]
