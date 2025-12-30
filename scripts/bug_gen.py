@@ -304,15 +304,110 @@ generator_image = (
     .add_local_file(".env", remote_path="/root/.env")
 )
 
-def get_validator_image(image_name: str) -> modal.Image:
-    """Get or create a validator image for the given Docker image name."""
-    print(f"DEBUG: get_validator_image called for {image_name}")
+# Global cache for validator images - populated by prebuild_validator_images()
+_validator_image_cache: dict[str, modal.Image] = {}
+
+
+def _create_validator_image(image_name: str) -> modal.Image:
+    """Create a validator image for the given Docker image name (internal helper)."""
     return (
         modal.Image.from_registry(image_name, add_python="3.11")
         .pip_install_from_pyproject("pyproject.toml", optional_dependencies=["validate"])
         .env({"PYTHONPATH": "/root"})
         .add_local_dir("swesmith", remote_path="/root/swesmith")
     )
+
+
+def get_validator_image(image_name: str) -> modal.Image:
+    """Get or create a validator image for the given Docker image name.
+    
+    Uses the global cache if available (populated by prebuild_validator_images).
+    """
+    if image_name in _validator_image_cache:
+        return _validator_image_cache[image_name]
+    
+    print(f"DEBUG: get_validator_image called for {image_name} (not cached, building...)")
+    image = _create_validator_image(image_name)
+    _validator_image_cache[image_name] = image
+    return image
+
+
+def prebuild_validator_images(repos_with_patches: dict) -> dict[str, modal.Image]:
+    """Pre-build and cache all validator images for the given repositories.
+    
+    This builds all unique Docker images by running a simple warmup command
+    in each image before any validation runs. This forces Modal to build
+    and upload all images in parallel upfront.
+    
+    Returns the cache dict of image_name -> modal.Image
+    """
+    global _validator_image_cache
+    
+    # Collect unique image names
+    unique_images = set()
+    for repo, info in repos_with_patches.items():
+        profile = info["profile"]
+        if hasattr(profile, "image_name") and profile.image_name:
+            unique_images.add(profile.image_name)
+    
+    print(f"\n{'='*60}")
+    print(f"PRE-BUILDING VALIDATOR IMAGES ({len(unique_images)} unique images)")
+    print(f"{'='*60}\n")
+    
+    # Filter out already-cached images
+    to_build = [img for img in unique_images if img not in _validator_image_cache]
+    
+    if not to_build:
+        print("All images already cached!")
+        return _validator_image_cache
+    
+    print(f"Building {len(to_build)} images in parallel...")
+    for i, img in enumerate(to_build, 1):
+        print(f"  [{i}] {img}")
+    
+    # Create all image objects and cache them using the helper
+    for img_name in to_build:
+        _validator_image_cache[img_name] = _create_validator_image(img_name)
+    
+    # Now run warmup sandboxes to force Modal to build all images
+    async def warmup_all():
+        semaphore = asyncio.Semaphore(50)  # Limit concurrent builds
+        
+        async def warmup_image(img_name: str) -> tuple[str, bool, str]:
+            """Run a simple command to force image build."""
+            async with semaphore:
+                try:
+                    print(f"  Building: {img_name}...")
+                    image = _validator_image_cache[img_name]
+                    sb = await modal.Sandbox.create.aio(app=app, image=image, timeout=300)
+                    process = await sb.exec.aio("echo", "warmup_ok")
+                    output = await process.stdout.read.aio()
+                    await sb.terminate.aio()
+                    print(f"  ✓ Built: {img_name}")
+                    return (img_name, True, "")
+                except Exception as e:
+                    print(f"  ✗ Failed: {img_name} - {e}")
+                    return (img_name, False, str(e))
+        
+        tasks = [warmup_image(img) for img in to_build]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        return results
+    
+    print("\nWarming up images (this triggers the actual build/upload)...")
+    results = asyncio.run(warmup_all())
+    
+    # Report results
+    success = sum(1 for r in results if isinstance(r, tuple) and r[1])
+    failed = len(results) - success
+    
+    print(f"\nImage build complete: {success} succeeded, {failed} failed")
+    if failed > 0:
+        for r in results:
+            if isinstance(r, tuple) and not r[1]:
+                print(f"  Failed: {r[0]} - {r[2]}")
+    print()
+    
+    return _validator_image_cache
 
 
 app = modal.App(APP_NAME)
@@ -1103,6 +1198,10 @@ def run_validation_phase(all_patches: list, max_concurrent: int, env_name: str) 
         return []
     
     repos_with_patches = build_repos_with_patches(all_patches)
+    
+    # Pre-build all validator images before starting validation
+    prebuild_validator_images(repos_with_patches)
+    
     failed_repos = run_pregold_phase(repos_with_patches, max_concurrent, env_name)
     
     # Filter out patches from repos with broken baselines
