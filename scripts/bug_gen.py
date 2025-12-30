@@ -163,23 +163,6 @@ def main():
         report_path = Path(config['report_path'])
         instance = config['instance']
         
-        # Early exit: skip if already validated (report.json exists)
-        if report_path.exists():
-            print(f"Already validated: {report_path} exists, skipping...")
-            try:
-                existing_report = json.loads(report_path.read_text())
-                is_valid = len(existing_report.get("PASS_TO_FAIL", [])) > 0
-            except:
-                is_valid = False
-            result_summary = {
-                "instance_id": instance.get("instance_id"),
-                "valid": is_valid,
-                "error": None,
-                "skipped": True
-            }
-            print(f"\n<<RESULT_JSON>>{json.dumps(result_summary)}<<RESULT_JSON>>")
-            return
-        
         # Ensure output directory exists (it's on a volume mount)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         
@@ -1143,24 +1126,21 @@ async def run_postgold_phase_async(all_patches: list, max_concurrent: int, env_n
     This is much more efficient for I/O-bound operations like Modal API calls:
     - ThreadPoolExecutor with 1000 workers = 1000 threads = high memory/CPU overhead
     - asyncio with semaphore = 1 thread + event loop = minimal overhead
-    
-    Note: Duplicate checks are handled gracefully by the remote validator script,
-    which skips validation if report.json already exists on the volume.
     """
     from swesmith.harness.grading import get_valid_report
     
     print(f"PHASE: POST-GOLD TESTS")
     print(f"Running {len(all_patches)} patches, max concurrent: {max_concurrent}")
-    print("  Note: Already-validated patches will be skipped by the remote validator")
     
     tasks = [
         {"repo": p["_repo"], "repo_id": p["_repo_id"], "profile": p["_profile"],
          "instance_id": p["instance_id"], "patch": p["patch"],
          "workdir": f"/{env_name}", "full_patch": p}
         for p in all_patches
+        if not volume_file_exists(f"{p['_language']}/run_validation/{p['_repo_id']}/{p['instance_id']}/report.json")
     ]
     
-    print(f"  Scheduled {len(tasks)} validation tasks")
+    print(f"  {len(all_patches) - len(tasks)} already validated, {len(tasks)} remaining")
     
     if not tasks:
         print("  All patches already validated!")
@@ -1207,7 +1187,6 @@ async def run_postgold_phase_async(all_patches: list, max_concurrent: int, env_n
     results = []
     completed = 0
     valid_count = 0
-    skipped_count = 0
     
     # Process results as they complete
     for coro in asyncio.as_completed(async_tasks):
@@ -1216,17 +1195,15 @@ async def run_postgold_phase_async(all_patches: list, max_concurrent: int, env_n
         
         processed = result
         processed["repo"] = task["repo"]
-        # result already has instance_id, valid, error, skipped keys from the sandbox return
+        # result already has instance_id, valid, error keys from the sandbox return
         
         results.append(processed)
         if processed.get("valid"):
             valid_count += 1
-        if processed.get("skipped"):
-            skipped_count += 1
         if completed % 100 == 0 or completed == len(tasks):
-            print(f"  Progress: {completed}/{len(tasks)} ({skipped_count} skipped), {valid_count} valid bugs")
+            print(f"  Progress: {completed}/{len(tasks)} tests, {valid_count} valid bugs")
     
-    print(f"Post-gold complete: {valid_count}/{len(tasks)} valid bugs ({skipped_count} were already validated)\n")
+    print(f"Post-gold complete: {valid_count}/{len(tasks)} valid bugs\n")
     return results
 
 
