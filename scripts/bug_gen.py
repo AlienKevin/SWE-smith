@@ -666,7 +666,7 @@ async def run_validation_in_sandbox(
     If postgold_config is None, runs generic test cmd and returns output.
     """
     async with semaphore:
-        print(f"[{instance_id}] Getting validator image ({image_name})...")
+        # print(f"[{instance_id}] Getting validator image ({image_name})...")
         validator_image = get_validator_image(image_name)
         
         script_lines = [
@@ -711,26 +711,26 @@ async def run_validation_in_sandbox(
         
         try:
             # Use Modal's native async APIs
-            print(f"[{instance_id}] Creating sandbox...")
+            # print(f"[{instance_id}] Creating sandbox...")
             sb = await modal.Sandbox.create.aio(**sandbox_kwargs)
             
-            print(f"[{instance_id}] Executing script...")
+            # print(f"[{instance_id}] Executing script...")
             process = await sb.exec.aio("bash", "-c", "\n".join(script_lines))
             
             try:
-                print(f"[{instance_id}] Reading stdout...")
+                # print(f"[{instance_id}] Reading stdout...")
                 output_raw = await process.stdout.read.aio()
             except UnicodeDecodeError as e:
                 return {"instance_id": instance_id, "error": f"Binary output (decode failed at pos {e.start})"}
             
-            print(f"[{instance_id}] Waiting for exit code...")
+            # print(f"[{instance_id}] Waiting for exit code...")
             exit_code = await process.wait.aio()
             
-            print(f"[{instance_id}] Terminating sandbox...")
+            # print(f"[{instance_id}] Terminating sandbox...")
             await sb.terminate.aio()
             
             output = output_raw.decode("utf-8", errors="replace") if isinstance(output_raw, bytes) else output_raw
-            print(f'{output=}')
+            # print(f'{output=}')
             
             if postgold_config:
                 # Parse JSON result from output
