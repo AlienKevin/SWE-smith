@@ -315,7 +315,8 @@ def get_validator_image(image_name: str) -> modal.Image:
     return image
 
 
-def prebuild_validator_images(repos_with_patches: dict) -> dict[str, modal.Image]:
+
+async def prebuild_validator_images_async(repos_with_patches: dict) -> dict[str, modal.Image]:
     """Pre-build and cache all validator images for the given repositories.
     
     This builds all unique Docker images by running a simple warmup command
@@ -377,7 +378,7 @@ def prebuild_validator_images(repos_with_patches: dict) -> dict[str, modal.Image
         return results
     
     print("\nWarming up images (this triggers the actual build/upload)...")
-    results = asyncio.run(warmup_all())
+    results = await warmup_all()
     
     # Report results
     success = sum(1 for r in results if isinstance(r, tuple) and r[1])
@@ -1113,9 +1114,7 @@ async def run_pregold_phase_async(repos_with_patches: dict, max_concurrent: int,
     return failed_repos
 
 
-def run_pregold_phase(repos_with_patches: dict, max_concurrent: int, env_name: str) -> set[str]:
-    """Sync wrapper for the async pre-gold phase."""
-    return asyncio.run(run_pregold_phase_async(repos_with_patches, max_concurrent, env_name))
+
 
 
 async def run_postgold_phase_async(all_patches: list, max_concurrent: int, env_name: str) -> list[dict]:
@@ -1221,12 +1220,10 @@ async def run_postgold_phase_async(all_patches: list, max_concurrent: int, env_n
     return results
 
 
-def run_postgold_phase(all_patches: list, max_concurrent: int, env_name: str) -> list[dict]:
-    """Sync wrapper for the async post-gold phase."""
-    return asyncio.run(run_postgold_phase_async(all_patches, max_concurrent, env_name))
 
 
-def run_validation_phase(all_patches: list, max_concurrent: int, env_name: str) -> list[dict]:
+
+async def run_validation_phase_async(all_patches: list, max_concurrent: int, env_name: str) -> list[dict]:
     """Run complete validation (pre-gold + post-gold). Existing baselines are skipped automatically."""
     if not all_patches:
         print("No patches to validate.")
@@ -1252,9 +1249,9 @@ def run_validation_phase(all_patches: list, max_concurrent: int, env_name: str) 
     repos_with_patches = build_repos_with_patches(all_patches)
     
     # Pre-build all validator images before starting validation
-    prebuild_validator_images(repos_with_patches)
+    await prebuild_validator_images_async(repos_with_patches)
     
-    failed_repos = run_pregold_phase(repos_with_patches, max_concurrent, env_name)
+    failed_repos = await run_pregold_phase_async(repos_with_patches, max_concurrent, env_name)
     
     # Filter out patches from repos with broken baselines
     if failed_repos:
@@ -1262,7 +1259,7 @@ def run_validation_phase(all_patches: list, max_concurrent: int, env_name: str) 
         all_patches = [p for p in all_patches if p["_repo"] not in failed_repos]
         print(f"Filtered out {original_count - len(all_patches)} patches from {len(failed_repos)} repos with broken baselines")
     
-    return run_postgold_phase(all_patches, max_concurrent, env_name)
+    return await run_postgold_phase_async(all_patches, max_concurrent, env_name)
 
 
 def print_summary(results: list[dict], repos_count: int):
@@ -1297,7 +1294,7 @@ def print_summary(results: list[dict], repos_count: int):
 # ============================================================================
 
 @app.local_entrypoint()
-def main(
+async def main(
     repos: str = "",
     language: str = "javascript",
     max_bugs: int = 200,
@@ -1373,7 +1370,7 @@ def main(
     all_patches = collect_patches_from_files(target_repos, language)
     print(f"Total: {len(all_patches)} patches\n")
     
-    results = run_validation_phase(all_patches, max_concurrent_tests, ENV_NAME)
+    results = await run_validation_phase_async(all_patches, max_concurrent_tests, ENV_NAME)
     
     if results:
         print_summary(results, len(build_repos_with_patches(all_patches)))
