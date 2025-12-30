@@ -1132,13 +1132,27 @@ async def run_postgold_phase_async(all_patches: list, max_concurrent: int, env_n
     print(f"PHASE: POST-GOLD TESTS")
     print(f"Running {len(all_patches)} patches, max concurrent: {max_concurrent}")
     
-    tasks = [
-        {"repo": p["_repo"], "repo_id": p["_repo_id"], "profile": p["_profile"],
-         "instance_id": p["instance_id"], "patch": p["patch"],
-         "workdir": f"/{env_name}", "full_patch": p}
-        for p in all_patches
-        if not volume_file_exists(f"{p['_language']}/run_validation/{p['_repo_id']}/{p['instance_id']}/report.json")
-    ]
+    # Parallelize volume existence checks to avoid slow sequential roundtrips
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def check_patch_completion(p):
+        path = f"{p['_language']}/run_validation/{p['_repo_id']}/{p['instance_id']}/report.json"
+        return p, volume_file_exists(path)
+
+    print(f"  Checking {len(all_patches)} patches for existing results (parallel)...")
+    tasks = []
+    
+    with ThreadPoolExecutor(max_workers=min(1000, len(all_patches) or 1)) as executor:
+        futures = {executor.submit(check_patch_completion, p): p for p in all_patches}
+        
+        for future in as_completed(futures):
+            p, exists = future.result()
+            if not exists:
+                tasks.append({
+                    "repo": p["_repo"], "repo_id": p["_repo_id"], "profile": p["_profile"],
+                    "instance_id": p["instance_id"], "patch": p["patch"],
+                    "workdir": f"/{env_name}", "full_patch": p
+                })
     
     print(f"  {len(all_patches) - len(tasks)} already validated, {len(tasks)} remaining")
     
