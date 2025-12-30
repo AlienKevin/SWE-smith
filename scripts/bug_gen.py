@@ -781,28 +781,49 @@ def run_generation_phase(repos: list[str], args, language: str) -> list[dict]:
     skipped_error = 0
     failed_to_resolve = []  # Repos that failed profile resolution
     
+    # First, resolve all profiles (can be done in parallel too, but usually fast)
+    resolved_repos = []  # List of (repo, repo_id) tuples
     for repo in repos:
         try:
             profile = resolve_profile(repo)
-            repo_id = profile.repo_name
+            resolved_repos.append((repo, profile.repo_name))
         except Exception as e:
             failed_to_resolve.append({"repo": repo, "repo_id": None, "error": f"Failed to resolve profile: {e}"})
-            continue
-            
+    
+    # Parallelize volume existence checks using ThreadPoolExecutor
+    # Each repo needs 3 checks: done.txt, error.txt, patches.json
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    def check_repo_status(repo_tuple: tuple[str, str]) -> tuple[str, str, str]:
+        """Check if a repo is already processed. Returns (repo, repo_id, status)."""
+        repo, repo_id = repo_tuple
         volume_bug_dir = f"{language}/bug_gen/{repo_id}"
         
-        # Check if already done or errored
         if volume_file_exists(f"{volume_bug_dir}/done.txt"):
-            print(f"  Skipping {repo}: already completed")
-            skipped_done += 1
+            return (repo, repo_id, "done")
         elif volume_file_exists(f"{volume_bug_dir}/error.txt"):
-            print(f"  Skipping {repo}: previously failed")
-            skipped_error += 1
+            return (repo, repo_id, "error")
         elif volume_file_exists(f"{language}/bug_gen/{repo_id}_all_patches.json"):
-            print(f"  Skipping {repo}: patches already exist")
-            skipped_done += 1
+            return (repo, repo_id, "patches_exist")
         else:
-            repo_inputs.append((repo, repo_id))
+            return (repo, repo_id, "pending")
+    
+    print(f"  Checking {len(resolved_repos)} repos for existing results (parallel)...")
+    with ThreadPoolExecutor(max_workers=min(50, len(resolved_repos) or 1)) as executor:
+        futures = {executor.submit(check_repo_status, rt): rt for rt in resolved_repos}
+        for future in as_completed(futures):
+            repo, repo_id, status = future.result()
+            if status == "done":
+                print(f"  Skipping {repo}: already completed")
+                skipped_done += 1
+            elif status == "error":
+                print(f"  Skipping {repo}: previously failed")
+                skipped_error += 1
+            elif status == "patches_exist":
+                print(f"  Skipping {repo}: patches already exist")
+                skipped_done += 1
+            else:
+                repo_inputs.append((repo, repo_id))
     
     if skipped_done or skipped_error:
         print(f"\nSkipped {skipped_done} completed, {skipped_error} failed repos\n")
@@ -874,27 +895,31 @@ def annotate_patches(patches: list, repo: str, repo_id: str, profile, language: 
 def collect_patches_from_files(repos: list[str], language: str) -> list[dict]:
     """Collect patches from Modal Volume for validate-only mode."""
     import re
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
     all_patches = []
     
+    # First, resolve all profiles (usually fast, local operation)
+    resolved_repos = []  # List of (repo, repo_id, profile) tuples
     for repo in repos:
         try:
             profile = resolve_profile(repo)
+            resolved_repos.append((repo, profile.repo_name, profile))
         except Exception:
             print(f"  Skipping {repo}: profile not found")
-            continue
-
-        repo_id = profile.repo_name
+    
+    def check_and_load_repo(repo_tuple: tuple) -> tuple:
+        """Check repo status and load patches if valid. Returns (repo, repo_id, profile, status, patches_json)."""
+        repo, repo_id, profile = repo_tuple
+        bug_gen_dir = f"{language}/bug_gen/{repo_id}"
         
         # 1. Check if validation previously failed (broken baseline)
         if volume_file_exists(f"{language}/run_validation/{repo_id}/{repo_id}.ref/error.txt"):
-            print(f"  Skipping {repo}: validation previously failed (pre-gold)")
-            continue
+            return (repo, repo_id, profile, "validation_failed", None)
             
         # 2. Check if generation failed
-        bug_gen_dir = f"{language}/bug_gen/{repo_id}"
         if volume_file_exists(f"{bug_gen_dir}/error.txt"):
-            print(f"  Skipping {repo}: bug generation failed")
-            continue
+            return (repo, repo_id, profile, "generation_failed", None)
             
         # 3. Check patch count from done.txt to avoid reading large files for small repos
         done_content = volume_read_text(f"{bug_gen_dir}/done.txt")
@@ -903,19 +928,37 @@ def collect_patches_from_files(repos: list[str], language: str) -> list[dict]:
             if match:
                 count = int(match.group(1))
                 if count < MIN_PATCHES_FOR_VALIDATION:
-                    print(f"  Skipping {repo}: too few patches ({count} < {MIN_PATCHES_FOR_VALIDATION})")
-                    continue
+                    return (repo, repo_id, profile, f"too_few_patches:{count}", None)
         
         # 4. Read patches
         patches_path = f"{language}/bug_gen/{repo_id}_all_patches.json"
         patches_json = volume_read_text(patches_path)
         
         if patches_json:
-            patches = json.loads(patches_json)
-            all_patches.extend(annotate_patches(patches, repo, repo_id, profile, language))
-            print(f"  {repo}: {len(patches)} patches")
+            return (repo, repo_id, profile, "ok", patches_json)
         else:
-            print(f"  Skipping {repo}: no patches file")
+            return (repo, repo_id, profile, "no_patches_file", None)
+    
+    print(f"  Checking {len(resolved_repos)} repos for patches (parallel)...")
+    with ThreadPoolExecutor(max_workers=min(50, len(resolved_repos) or 1)) as executor:
+        futures = {executor.submit(check_and_load_repo, rt): rt for rt in resolved_repos}
+        for future in as_completed(futures):
+            repo, repo_id, profile, status, patches_json = future.result()
+            
+            if status == "validation_failed":
+                print(f"  Skipping {repo}: validation previously failed (pre-gold)")
+            elif status == "generation_failed":
+                print(f"  Skipping {repo}: bug generation failed")
+            elif status.startswith("too_few_patches:"):
+                count = status.split(":")[1]
+                print(f"  Skipping {repo}: too few patches ({count} < {MIN_PATCHES_FOR_VALIDATION})")
+            elif status == "no_patches_file":
+                print(f"  Skipping {repo}: no patches file")
+            elif status == "ok" and patches_json:
+                patches = json.loads(patches_json)
+                all_patches.extend(annotate_patches(patches, repo, repo_id, profile, language))
+                print(f"  {repo}: {len(patches)} patches")
+    
     return all_patches
 
 
@@ -955,24 +998,42 @@ async def run_pregold_phase_async(repos_with_patches: dict, max_concurrent: int,
     tasks = []
     previously_failed = set()  # Repos that failed in previous runs
     
-    for repo, info in repos_with_patches.items():
+    # Parallelize volume existence checks
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    def check_baseline_status(repo_info_tuple: tuple) -> tuple[str, dict, str]:
+        """Check if baseline exists or failed. Returns (repo, info, status)."""
+        repo, info = repo_info_tuple
         lang = info["language"]
         baseline_output_path = f"{lang}/run_validation/{info['repo_id']}/{info['repo_id']}.ref/test_output.txt"
         error_path = f"{lang}/run_validation/{info['repo_id']}/{info['repo_id']}.ref/error.txt"
+        
         test_output_exists = volume_file_exists(baseline_output_path)
         error_exists = volume_file_exists(error_path)
         
         if test_output_exists and not error_exists:
-            print(f"  Skipping {repo}: baseline exists")
+            return (repo, info, "exists")
         elif error_exists:
-            print(f"  Skipping {repo}: previously failed")
-            previously_failed.add(repo)
+            return (repo, info, "failed")
         else:
-            tasks.append({
-                "repo": repo, "repo_id": info["repo_id"], "profile": info["profile"],
-                "instance_id": f"{info['repo_id']}.ref", "workdir": f"/{env_name}",
-                "language": lang
-            })
+            return (repo, info, "pending")
+    
+    print(f"  Checking {len(repos_with_patches)} baselines for existing results (parallel)...")
+    with ThreadPoolExecutor(max_workers=min(50, len(repos_with_patches) or 1)) as executor:
+        futures = {executor.submit(check_baseline_status, (repo, info)): repo for repo, info in repos_with_patches.items()}
+        for future in as_completed(futures):
+            repo, info, status = future.result()
+            if status == "exists":
+                print(f"  Skipping {repo}: baseline exists")
+            elif status == "failed":
+                print(f"  Skipping {repo}: previously failed")
+                previously_failed.add(repo)
+            else:
+                tasks.append({
+                    "repo": repo, "repo_id": info["repo_id"], "profile": info["profile"],
+                    "instance_id": f"{info['repo_id']}.ref", "workdir": f"/{env_name}",
+                    "language": info["language"]
+                })
     
     if not tasks:
         print("  All baselines already exist!\\n")
