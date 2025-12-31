@@ -748,7 +748,7 @@ async def run_validation_in_sandbox(
             if "timeout" in err_str.lower() or "SandboxTimeoutError" in err_str:
                 print(f"Runner stopped due to sandbox timeout.")
                 return {"instance_id": instance_id, "error": f"Timeout ({timeout}s)"}
-            print(f"Runner failed with exit code: -1")
+            print(f"Runner failed: {err_str[:100]}")
             return {"instance_id": instance_id, "error": err_str}
         finally:
             # Always terminate sandbox to prevent zombie connections
@@ -1220,6 +1220,9 @@ async def run_postgold_phase_async(all_patches: list, max_concurrent: int, env_n
         # Strip internal keys (prefixed with _) that contain non-serializable objects like the profile
         serializable_patch = {k: v for k, v in task["full_patch"].items() if not k.startswith("_")}
         
+        # Volume path for report (used for both success and failure)
+        report_volume_path = f"{lang}/run_validation/{repo_id}/{instance_id}/report.json"
+        
         postgold_config = {
             "test_cmd": task["profile"].test_cmd,
             "output_path": f"/logs/{lang}/run_validation/{repo_id}/{instance_id}/test_output.txt",
@@ -1235,6 +1238,23 @@ async def run_postgold_phase_async(all_patches: list, max_concurrent: int, env_n
             patch=task["patch"], timeout=task["profile"].timeout,
             postgold_config=postgold_config
         )
+        
+        # If validation failed (error in result), write a report.json anyway
+        # so this patch won't be retried on subsequent runs
+        if "error" in result and result.get("error"):
+            error_report = {
+                "instance_id": instance_id,
+                "valid": False,
+                "error": result["error"],
+                "PASS_TO_FAIL": [],
+                "FAIL_TO_PASS": [],
+                "skipped": True  # Mark as skipped so we know it wasn't a real validation
+            }
+            try:
+                await volume_write_text(report_volume_path, json.dumps(error_report, indent=2))
+            except Exception as write_err:
+                print(f"Failed to write error report for {instance_id}: {write_err}")
+        
         return (task, result)
     
     # Create all async tasks
