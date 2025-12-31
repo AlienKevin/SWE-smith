@@ -1652,10 +1652,6 @@ async def main(
     else:
         target_repos = get_repos_for_language(language)
         
-        # Skip problematic repos
-        ignored_map = ["mrdoob/three.js", "riot/riot"]
-        target_repos = [r for r in target_repos if r not in ignored_map]
-        
         print(f"Found {len(target_repos)} repos for '{language}':")
         for r in target_repos:
             print(f"  - {r}")
