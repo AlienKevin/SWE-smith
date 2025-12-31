@@ -1524,6 +1524,12 @@ async def show_volume_stats(language: str) -> None:
     total_val = 0
     total_valid = 0
     
+    # Collect per-repo values for statistics
+    gen_values = []
+    val_values = []
+    valid_values = []
+    pass_rate_values = []
+    
     for repo_id, stats in sorted(repo_stats.items()):
         gen = stats["generated"]
         val = stats["validated"]
@@ -1534,11 +1540,44 @@ async def show_volume_stats(language: str) -> None:
         total_valid += valid
         
         pass_rate = (valid / val * 100) if val > 0 else 0
+        
+        gen_values.append(gen)
+        val_values.append(val)
+        valid_values.append(valid)
+        pass_rate_values.append(pass_rate)
+        
         print(f"{repo_id:<60} | {gen:>6} | {val:>6} | {valid:>6} | {pass_rate:>7.1f}%")
     
     print("-" * 95)
     total_pass_rate = (total_valid / total_val * 100) if total_val > 0 else 0
     print(f"{'TOTAL':<60} | {total_gen:>6} | {total_val:>6} | {total_valid:>6} | {total_pass_rate:>7.1f}%")
+    
+    # Calculate and print statistics (mean, std, min, median, max)
+    if len(repo_stats) > 0:
+        import statistics
+        
+        def calc_stats(values: list[float]) -> tuple[float, float, float, float, float]:
+            """Calculate mean, std, min, median, max for a list of values."""
+            if not values:
+                return (0, 0, 0, 0, 0)
+            mean = statistics.mean(values)
+            std = statistics.stdev(values) if len(values) > 1 else 0
+            min_val = min(values)
+            median = statistics.median(values)
+            max_val = max(values)
+            return (mean, std, min_val, median, max_val)
+        
+        gen_stats = calc_stats(gen_values)
+        val_stats = calc_stats(val_values)
+        valid_stats = calc_stats(valid_values)
+        pass_stats = calc_stats(pass_rate_values)
+        
+        print("-" * 95)
+        print(f"{'MEAN':<60} | {gen_stats[0]:>6.1f} | {val_stats[0]:>6.1f} | {valid_stats[0]:>6.1f} | {pass_stats[0]:>7.1f}%")
+        print(f"{'STD':<60} | {gen_stats[1]:>6.1f} | {val_stats[1]:>6.1f} | {valid_stats[1]:>6.1f} | {pass_stats[1]:>7.1f}%")
+        print(f"{'MIN':<60} | {gen_stats[2]:>6.0f} | {val_stats[2]:>6.0f} | {valid_stats[2]:>6.0f} | {pass_stats[2]:>7.1f}%")
+        print(f"{'MEDIAN':<60} | {gen_stats[3]:>6.1f} | {val_stats[3]:>6.1f} | {valid_stats[3]:>6.1f} | {pass_stats[3]:>7.1f}%")
+        print(f"{'MAX':<60} | {gen_stats[4]:>6.0f} | {val_stats[4]:>6.0f} | {valid_stats[4]:>6.0f} | {pass_stats[4]:>7.1f}%")
     
     # Count repos with >0 valid bugs
     repos_with_valid_bugs = sum(1 for stats in repo_stats.values() if stats["valid"] > 0)
