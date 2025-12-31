@@ -107,6 +107,47 @@ Identical to LM Generated task instances, but the artifacts are instead named:
 Where `<name>` refers to the specific identifier for the procedural modification technique.
 There are 13 (and counting) in total.
 
+### Running at Scale on Modal
+
+For generating and validating bugs across many repositories, use the `scripts/bug_gen.py` script which runs on [Modal](https://modal.com) for scalable cloud execution.
+
+**Basic Usage**
+
+```bash
+# Generate + validate bugs for all JavaScript repos
+modal run scripts/bug_gen.py --language javascript
+
+# Process specific repos only
+modal run scripts/bug_gen.py --language javascript --repos "owner/repo1,owner/repo2"
+```
+
+**Two-Phase Pipeline**
+
+The script runs two phases automatically:
+
+1. **Generation Phase**: Creates bug candidates for each repository using procedural modifications.
+2. **Validation Phase**: Runs pre-gold (baseline) tests, then post-gold tests to verify which bugs actually break tests. Results are persisted to the Modal Volume.
+
+!!! tip "Incremental Processing"
+    The script automatically skips already-processed repos and patches. You can safely re-run the command to continue from where it left off.
+
+**Monitor Progress**
+
+```bash
+# Check current stats without running generation/validation
+modal run scripts/bug_gen.py --language javascript --show-stats
+```
+
+This displays a table with generated, validated, and valid bug counts per repository.
+
+**Logging to File**
+
+To save output to a log file with real-time unbuffered streaming:
+
+```bash
+PYTHONUNBUFFERED=1 stdbuf -oL -eL uv run modal run --detach scripts/bug_gen.py --language javascript 2>&1 | tee validation.log
+```
+
 ## PR Mirroring
 
 **How does it work?**
