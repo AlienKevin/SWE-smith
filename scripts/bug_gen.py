@@ -723,34 +723,58 @@ async def run_validation_in_sandbox(
             ])
         
         sb = None
+        sandbox_id = None  # Track sandbox ID for debugging
+        current_step = "init"  # Track current step for error reporting
+        
+        # Debug logging helper
+        import time
+        debug_sandbox = True  # Set to True to enable detailed sandbox logging
+        def _log(step: str, msg: str = ""):
+            nonlocal current_step
+            current_step = step
+            if debug_sandbox:
+                ts = time.strftime("%H:%M:%S")
+                extra = f" - {msg}" if msg else ""
+                print(f"[{ts}][{instance_id}] {step}{extra}")
+        
         try:
             # Rate limit sandbox creation (Modal limit: 5/s)
+            _log("rate_limit", "acquiring...")
             await _sandbox_rate_limiter.acquire()
+            _log("rate_limit", "acquired")
             
-            # Use Modal's native async APIs
-            # print(f"[{instance_id}] Creating sandbox...")
+            # Create sandbox
+            _log("create_sandbox", f"image={image_name}, timeout={timeout}s")
             sb = await modal.Sandbox.create.aio(**sandbox_kwargs)
+            sandbox_id = getattr(sb, 'object_id', None) or getattr(sb, '_object_id', 'unknown')
+            _log("create_sandbox", f"created (sandbox_id={sandbox_id})")
             
             # Write script to file directly using sandbox.open() to avoid ARG_MAX limit
             script_content = "\n".join(script_lines)
+            script_size = len(script_content)
             
             # Write script file directly to sandbox filesystem (more robust than stdin)
+            _log("write_script", f"opening /tmp/run.sh ({script_size} bytes)")
             f = await sb.open.aio("/tmp/run.sh", "w")
+            _log("write_script", "writing content")
             await f.write.aio(script_content)
+            _log("write_script", "closing file")
             await f.close.aio()
+            _log("write_script", "done")
             
             # Execute the script
+            _log("exec_script", "starting bash /tmp/run.sh")
             process = await sb.exec.aio("bash", "/tmp/run.sh")
+            _log("exec_script", "process started")
             
-            try:
-                # print(f"[{instance_id}] Reading stdout...")
-                output_raw = await process.stdout.read.aio()
-            except UnicodeDecodeError as e:
-                return {"instance_id": instance_id, "error": f"Binary output (decode failed at pos {e.start})"}
+            _log("read_stdout", "reading...")
+            output_raw = await process.stdout.read.aio()
+            output_size = len(output_raw) if output_raw else 0
+            _log("read_stdout", f"done ({output_size} bytes)")
             
-            # print(f"[{instance_id}] Waiting for exit code...")
+            _log("wait_exit", "waiting for exit code...")
             exit_code = await process.wait.aio()
-            
+            _log("wait_exit", f"exit_code={exit_code}")
             output = output_raw.decode("utf-8", errors="replace") if isinstance(output_raw, bytes) else output_raw
             # print(f'{output=}')
             
@@ -767,21 +791,15 @@ async def run_validation_in_sandbox(
                              pass
                         return result
                     except Exception as e:
-                        return {"instance_id": instance_id, "error": f"Failed to parse remote result: {e}", "raw_output": output}
+                        return {"instance_id": instance_id, "error": f"Failed to parse remote result: {e}", "raw_output": output, "step": current_step, "sandbox_id": sandbox_id}
                 else:
-                     return {"instance_id": instance_id, "error": "No remote result found", "raw_output": output}
+                     return {"instance_id": instance_id, "error": "No remote result found", "raw_output": output, "step": current_step, "sandbox_id": sandbox_id}
             else:
                 return {"instance_id": instance_id, "output": output, "exit_code": exit_code}
-                
-        except UnicodeDecodeError as e:
-            return {"instance_id": instance_id, "error": f"Binary output (decode failed at pos {e.start})"}
         except Exception as e:
             err_str = str(e)
-            if "timeout" in err_str.lower() or "SandboxTimeoutError" in err_str:
-                print(f"Runner stopped due to sandbox timeout.")
-                return {"instance_id": instance_id, "error": f"Timeout ({timeout}s)"}
-            print(f"Runner failed: {err_str[:100]}")
-            return {"instance_id": instance_id, "error": err_str}
+            _log("exception", f"ERROR: {err_str[:200]}")
+            return {"instance_id": instance_id, "error": err_str[:2000], "step": current_step, "sandbox_id": sandbox_id}
         finally:
             # Always terminate sandbox to prevent zombie connections
             if sb is not None:
