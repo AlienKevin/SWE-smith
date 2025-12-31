@@ -295,7 +295,9 @@ class OperationChangeConstantsModifier(JavaScriptProceduralModifier):
             if n.type == "number":
                 if self.flip():
                     try:
-                        value_text = _safe_decode(source_bytes[n.start_byte : n.end_byte])
+                        value_text = _safe_decode(
+                            source_bytes[n.start_byte : n.end_byte]
+                        )
                         value = int(value_text)
                         # Small off-by-one changes
                         new_value = value + self.rand.choice([-1, 1, -2, 2])
@@ -430,7 +432,9 @@ class OperationBreakChainsModifier(JavaScriptProceduralModifier):
 class AugmentedAssignmentSwapModifier(JavaScriptProceduralModifier):
     """Swap augmented assignment operators (+=, -=, *=, /=, etc.) and update expressions (++, --)"""
 
-    explanation: str = "The augmented assignment or update operator is likely incorrect."
+    explanation: str = (
+        "The augmented assignment or update operator is likely incorrect."
+    )
     name: str = "func_pm_aug_assign_swap"
     conditions: list = [CodeProperty.IS_FUNCTION, CodeProperty.HAS_ASSIGNMENT]
 
@@ -571,24 +575,28 @@ class TernaryOperatorSwapModifier(JavaScriptProceduralModifier):
                 condition = None
                 consequent = None
                 alternative = None
-                
+
                 # Parse children - skip operators
                 content_children = [c for c in n.children if c.type not in ["?", ":"]]
                 if len(content_children) >= 3:
                     condition = content_children[0]
                     consequent = content_children[1]
                     alternative = content_children[2]
-                    
+
                     if condition and consequent and alternative and self.flip():
                         # Choose modification type randomly
-                        mod_type = self.rand.choice(["swap_branches", "negate_condition"])
-                        changes.append({
-                            "node": n,
-                            "condition": condition,
-                            "consequent": consequent,
-                            "alternative": alternative,
-                            "mod_type": mod_type,
-                        })
+                        mod_type = self.rand.choice(
+                            ["swap_branches", "negate_condition"]
+                        )
+                        changes.append(
+                            {
+                                "node": n,
+                                "condition": condition,
+                                "consequent": consequent,
+                                "alternative": alternative,
+                                "mod_type": mod_type,
+                            }
+                        )
 
             for child in n.children:
                 collect_ternary_ops(child)
@@ -607,19 +615,29 @@ class TernaryOperatorSwapModifier(JavaScriptProceduralModifier):
             alternative = change["alternative"]
             mod_type = change["mod_type"]
 
-            condition_text = _safe_decode(source_bytes[condition.start_byte : condition.end_byte])
-            consequent_text = _safe_decode(source_bytes[consequent.start_byte : consequent.end_byte])
-            alternative_text = _safe_decode(source_bytes[alternative.start_byte : alternative.end_byte])
+            condition_text = _safe_decode(
+                source_bytes[condition.start_byte : condition.end_byte]
+            )
+            consequent_text = _safe_decode(
+                source_bytes[consequent.start_byte : consequent.end_byte]
+            )
+            alternative_text = _safe_decode(
+                source_bytes[alternative.start_byte : alternative.end_byte]
+            )
 
             if mod_type == "swap_branches":
                 # Swap consequent and alternative: a ? b : c -> a ? c : b
-                new_ternary = f"{condition_text} ? {alternative_text} : {consequent_text}"
+                new_ternary = (
+                    f"{condition_text} ? {alternative_text} : {consequent_text}"
+                )
             else:  # negate_condition
                 # Negate condition: a ? b : c -> !a ? b : c  (but keep branches, so effectively swaps logic)
                 # Actually, negating and keeping same branches is same as swapping, so:
                 # a ? b : c -> !(a) ? b : c  which equals a ? c : b
                 # Let's do: negate condition AND swap branches for different bug pattern
-                new_ternary = f"!({condition_text}) ? {consequent_text} : {alternative_text}"
+                new_ternary = (
+                    f"!({condition_text}) ? {consequent_text} : {alternative_text}"
+                )
 
             modified_source = (
                 modified_source[: node.start_byte]
@@ -666,23 +684,24 @@ class FunctionArgumentSwapModifier(JavaScriptProceduralModifier):
                     if child.type == "arguments":
                         args_node = child
                         break
-                
+
                 if args_node:
                     # Get actual arguments (skip parentheses and commas)
                     args = [
-                        c for c in args_node.children 
-                        if c.type not in ["(", ")", ","]
+                        c for c in args_node.children if c.type not in ["(", ")", ","]
                     ]
-                    
+
                     # Need at least 2 arguments to swap
                     if len(args) >= 2 and self.flip():
                         # Choose which pair to swap
                         swap_idx = self.rand.randint(0, len(args) - 2)
-                        changes.append({
-                            "args_node": args_node,
-                            "args": args,
-                            "swap_idx": swap_idx,
-                        })
+                        changes.append(
+                            {
+                                "args_node": args_node,
+                                "args": args,
+                                "swap_idx": swap_idx,
+                            }
+                        )
 
             for child in n.children:
                 collect_function_calls(child)
@@ -727,5 +746,3 @@ class FunctionArgumentSwapModifier(JavaScriptProceduralModifier):
             )
 
         return _safe_decode(modified_source, source_code)
-
-

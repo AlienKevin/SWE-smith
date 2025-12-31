@@ -20,6 +20,7 @@ from functools import cached_property
 from ghapi.all import GhApi
 from multiprocessing import Lock
 from pathlib import Path
+
 # Note: swesmith.bug_gen.adapters is imported lazily in extract_entities() to avoid
 # loading tree-sitter dependencies when only using Registry/get_valid_report
 from swebench.harness.constants import (
@@ -65,7 +66,9 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
     org_gh: str = ORG_NAME_GH
     arch: str = "x86_64"
     pltf: str = "linux/x86_64"
-    exts: list[str] = field(default_factory=list)  # Set by extract_entities if not provided
+    exts: list[str] = field(
+        default_factory=list
+    )  # Set by extract_entities if not provided
     eval_sets: set[str] = field(default_factory=set)
 
     # Install + Test specifications
@@ -272,10 +275,12 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
         if not os.path.exists(dest):
             token = os.getenv("GITHUB_TOKEN")
             if token:
-                base_url = f"https://x-access-token:{token}@github.com/{self.mirror_name}.git"
+                base_url = (
+                    f"https://x-access-token:{token}@github.com/{self.mirror_name}.git"
+                )
             else:
                 base_url = f"git@github.com:{self.mirror_name}.git"
-            
+
             clone_cmd = (
                 f"git clone {base_url}"
                 if dest is None
@@ -309,10 +314,10 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
         """
         # Lazy import to avoid loading tree-sitter dependencies when not needed
         from swesmith.bug_gen.adapters import get_entities_from_file, SUPPORTED_EXTS
-        
+
         # Use SUPPORTED_EXTS if exts was not explicitly set
         exts = self.exts if self.exts else SUPPORTED_EXTS
-        
+
         dir_path, cloned = self.clone()
         entities = []
         for root, _, files in os.walk(dir_path):

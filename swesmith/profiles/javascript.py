@@ -132,8 +132,8 @@ def parse_log_vitest(log: str) -> dict[str, str]:
                 # Normalize test file names: extract just the file path before parentheses
                 # e.g., "test/foo.test.js (9 tests)" -> "test/foo.test.js"
                 # or "test/foo.test.js (9 tests | 5 failed) 22ms" -> "test/foo.test.js"
-                if '(' in test_name:
-                    test_name = test_name.split('(')[0].strip()
+                if "(" in test_name:
+                    test_name = test_name.split("(")[0].strip()
                 test_status_map[test_name] = status
                 break
 

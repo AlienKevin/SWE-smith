@@ -12,9 +12,9 @@ from swesmith.bug_gen.procedural.javascript.remove import (
 def normalize_code(code: str) -> str:
     """Normalize code for comparison by collapsing consecutive whitespace/newlines."""
     # Remove leading/trailing whitespace from each line, filter empty lines
-    lines = [line.strip() for line in code.strip().split('\n')]
+    lines = [line.strip() for line in code.strip().split("\n")]
     lines = [line for line in lines if line]
-    return '\n'.join(lines)
+    return "\n".join(lines)
 
 
 @pytest.mark.parametrize(

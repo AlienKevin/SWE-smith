@@ -77,23 +77,27 @@ def main(
     rp = registry.get(repo)
     rp.clone()
     entities = rp.extract_entities()
-    
+
     def check_timeout():
         """Check if timeout has been reached. Returns True if should stop."""
         if start_time is None:
             return False
         elapsed = time.time() - start_time
         if elapsed >= timeout_seconds:
-            print(f"\n[{repo}] TIMEOUT: Reached {timeout_seconds}s limit after {elapsed:.1f}s, stopping generation...")
+            print(
+                f"\n[{repo}] TIMEOUT: Reached {timeout_seconds}s limit after {elapsed:.1f}s, stopping generation..."
+            )
             return True
         return False
-    
+
     # Apply entity sampling if limit is set and exceeded
     original_count = len(entities)
     if max_entities > 0 and original_count > max_entities:
         random.shuffle(entities)
         entities = entities[:max_entities]
-        print(f"Found {original_count} entities in {repo}, sampled down to {max_entities} for efficiency.")
+        print(
+            f"Found {original_count} entities in {repo}, sampled down to {max_entities} for efficiency."
+        )
     else:
         print(f"Found {len(entities)} entities in {repo}.")
 
@@ -104,7 +108,7 @@ def main(
     def process_with_timeout():
         """Process candidates with timeout checking. Returns total bugs processed."""
         local_total = 0
-        
+
         if interleave:
             # Build all (candidate, modifier) pairs upfront
             pairs = []
@@ -128,7 +132,7 @@ def main(
 
             # Shuffle all pairs to interleave modifiers
             random.shuffle(pairs)
-            
+
             # Apply max_candidates limit if set
             original_pairs_len = len(pairs)
             if max_candidates > 0 and original_pairs_len > max_candidates:
@@ -172,7 +176,7 @@ def main(
                         if check_timeout():
                             return local_total
         return local_total
-    
+
     total = process_with_timeout()
 
     shutil.rmtree(repo)

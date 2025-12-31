@@ -49,21 +49,21 @@ class Bar:
             file_content = f.read()
         node = ast.parse(file_content).body[0]
         entity = _build_entity(node, file_content, self.test_file)
-        
+
         # Original content for comparison
         with open(self.test_file) as f:
             original_content = f.read()
-        
+
         # Empty rewrite should not crash
         bug = utils.BugRewrite(
             rewrite="",  # Empty rewrite
             explanation="empty rewrite test",
             strategy="test",
         )
-        
+
         # This should not raise IndexError
         utils.apply_code_change(entity, bug)
-        
+
         # File should remain unchanged
         with open(self.test_file) as f:
             content = f.read()

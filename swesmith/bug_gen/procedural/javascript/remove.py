@@ -230,14 +230,18 @@ class RemoveTernaryModifier(JavaScriptProceduralModifier):
                 if len(content_children) >= 3:
                     consequent = content_children[1]
                     alternative = content_children[2]
-                    
+
                     if self.flip():
                         # Randomly choose which branch to keep
                         keep_consequent = self.rand.choice([True, False])
-                        changes.append({
-                            "node": n,
-                            "replacement": consequent if keep_consequent else alternative,
-                        })
+                        changes.append(
+                            {
+                                "node": n,
+                                "replacement": consequent
+                                if keep_consequent
+                                else alternative,
+                            }
+                        )
 
             for child in n.children:
                 collect_ternary_ops(child)
@@ -253,7 +257,9 @@ class RemoveTernaryModifier(JavaScriptProceduralModifier):
             node = change["node"]
             replacement = change["replacement"]
 
-            replacement_text = source_bytes[replacement.start_byte : replacement.end_byte].decode("utf-8")
+            replacement_text = source_bytes[
+                replacement.start_byte : replacement.end_byte
+            ].decode("utf-8")
 
             modified_source = (
                 modified_source[: node.start_byte]
