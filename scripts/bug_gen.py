@@ -688,6 +688,7 @@ async def run_validation_in_sandbox(
                 f": '{TEST_OUTPUT_END}'",
             ])
         
+        sb = None
         try:
             # Use Modal's native async APIs
             # print(f"[{instance_id}] Creating sandbox...")
@@ -704,9 +705,6 @@ async def run_validation_in_sandbox(
             
             # print(f"[{instance_id}] Waiting for exit code...")
             exit_code = await process.wait.aio()
-            
-            # print(f"[{instance_id}] Terminating sandbox...")
-            await sb.terminate.aio()
             
             output = output_raw.decode("utf-8", errors="replace") if isinstance(output_raw, bytes) else output_raw
             # print(f'{output=}')
@@ -735,8 +733,17 @@ async def run_validation_in_sandbox(
         except Exception as e:
             err_str = str(e)
             if "timeout" in err_str.lower() or "SandboxTimeoutError" in err_str:
+                print(f"Runner stopped due to sandbox timeout.")
                 return {"instance_id": instance_id, "error": f"Timeout ({timeout}s)"}
+            print(f"Runner failed with exit code: -1")
             return {"instance_id": instance_id, "error": err_str}
+        finally:
+            # Always terminate sandbox to prevent zombie connections
+            if sb is not None:
+                try:
+                    await sb.terminate.aio()
+                except Exception:
+                    pass  # Ignore errors during cleanup
 
 
 # ============================================================================
