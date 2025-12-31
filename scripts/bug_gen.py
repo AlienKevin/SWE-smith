@@ -694,21 +694,16 @@ async def run_validation_in_sandbox(
             # print(f"[{instance_id}] Creating sandbox...")
             sb = await modal.Sandbox.create.aio(**sandbox_kwargs)
             
-            # Write script to file first to avoid ARG_MAX limit (65KB) for large patches
+            # Write script to file directly using sandbox.open() to avoid ARG_MAX limit
             script_content = "\n".join(script_lines)
             
-            # Use a small bootstrap command to write and execute the script
-            # This avoids passing large scripts as command-line arguments
-            bootstrap_cmd = "cat > /tmp/run.sh && chmod +x /tmp/run.sh && /tmp/run.sh"
+            # Write script file directly to sandbox filesystem (more robust than stdin)
+            f = await sb.open.aio("/tmp/run.sh", "w")
+            await f.write.aio(script_content)
+            await f.close.aio()
             
-            # print(f"[{instance_id}] Executing script...")
-            process = await sb.exec.aio("bash", "-c", bootstrap_cmd)
-            
-            # Write the script content to stdin and close it so cat can complete
-            # Note: write() and write_eof() are non-blocking, drain() flushes the buffer
-            process.stdin.write(script_content.encode("utf-8"))
-            process.stdin.write_eof()
-            await process.stdin.drain.aio()
+            # Execute the script
+            process = await sb.exec.aio("bash", "/tmp/run.sh")
             
             try:
                 # print(f"[{instance_id}] Reading stdout...")
