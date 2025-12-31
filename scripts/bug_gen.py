@@ -116,6 +116,7 @@ APP_NAME = "swesmith-bug-gen"
 VOLUME_NAME = "swesmith-bug-gen"
 MINUTES = 60
 MODAL_TIMEOUT = 10 * MINUTES
+SANDBOX_RATE_LIMIT = 4  # Modal limits to 5/s, use 4 to be safe
 
 LANGUAGE_TO_BASE_CLASS = {
     "python": "PythonProfile",
@@ -361,6 +362,9 @@ async def prebuild_validator_images_async(repos_with_patches: dict) -> dict[str,
             """Run a simple command to force image build."""
             async with semaphore:
                 try:
+                    # Rate limit sandbox creation
+                    await _sandbox_rate_limiter.acquire()
+                    
                     print(f"  Building: {img_name}...")
                     image = _validator_image_cache[img_name]
                     sb = await modal.Sandbox.create.aio(app=app, image=image, timeout=300)
@@ -452,6 +456,36 @@ async def volume_list_dir(path: str) -> list[str]:
         return [e.path for e in entries]
     except Exception:
         return []
+
+
+# ============================================================================
+# Rate Limiter for Sandbox Creation
+# ============================================================================
+
+class AsyncRateLimiter:
+    """Token bucket rate limiter for controlling sandbox creation rate."""
+    
+    def __init__(self, rate: float):
+        """Create rate limiter with given rate (operations per second)."""
+        self.rate = rate
+        self.interval = 1.0 / rate  # Time between operations
+        self._lock = asyncio.Lock()
+        self._last_time = 0.0
+    
+    async def acquire(self):
+        """Wait until rate limit allows another operation."""
+        async with self._lock:
+            import time
+            now = time.monotonic()
+            wait_time = self._last_time + self.interval - now
+            if wait_time > 0:
+                await asyncio.sleep(wait_time)
+                now = time.monotonic()
+            self._last_time = now
+
+
+# Global rate limiter for sandbox creation (Modal limit: 5/s)
+_sandbox_rate_limiter = AsyncRateLimiter(SANDBOX_RATE_LIMIT)
 
 
 # ============================================================================
@@ -690,6 +724,9 @@ async def run_validation_in_sandbox(
         
         sb = None
         try:
+            # Rate limit sandbox creation (Modal limit: 5/s)
+            await _sandbox_rate_limiter.acquire()
+            
             # Use Modal's native async APIs
             # print(f"[{instance_id}] Creating sandbox...")
             sb = await modal.Sandbox.create.aio(**sandbox_kwargs)
