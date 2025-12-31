@@ -1416,7 +1416,29 @@ async def show_volume_stats(language: str) -> None:
     print(f"\nReading stats from volume '{VOLUME_NAME}/{language}/'...\n")
     
     repo_stats: dict[str, dict[str, int]] = {}
+    modifier_stats: dict[str, dict[str, int]] = {}  # Track stats by modifier
     semaphore = asyncio.Semaphore(100)  # Limit concurrent reads
+    
+    def extract_modifier(instance_id: str) -> str:
+        """Extract modifier name from instance_id (format: repo_id.modifier__hash).
+        
+        Example instance_id: Shopify__draggable.8a1eed57.func_pm_arg_swap__abc123
+        Should extract: func_pm_arg_swap
+        """
+        # The modifier is the part before the final '__' which is followed by the hash
+        # Find the last occurrence of '__' and take what's before it
+        if '__' not in instance_id:
+            return "unknown"
+        
+        # Split by '__' and take the second-to-last part
+        # e.g., "repo.commit.func_pm_arg_swap__abc123" -> ["repo.commit.func_pm_arg_swap", "abc123"]
+        before_hash = instance_id.rsplit('__', 1)[0]  # "repo.commit.func_pm_arg_swap"
+        
+        # The modifier is the last dot-separated part
+        # e.g., "repo.commit.func_pm_arg_swap" -> "func_pm_arg_swap"
+        if '.' in before_hash:
+            return before_hash.rsplit('.', 1)[-1]  # Get last part after final '.'
+        return before_hash
     
     # 1. Count generated bugs from patches files (parallel)
     bug_gen_dir = f"{language}/bug_gen"
@@ -1424,7 +1446,7 @@ async def show_volume_stats(language: str) -> None:
         entries = await logs_volume.listdir.aio(bug_gen_dir)
         patch_files = [e for e in entries if e.path.endswith("_all_patches.json")]
         
-        async def read_patches(entry) -> tuple[str, int]:
+        async def read_patches(entry) -> tuple[str, int, list[dict]]:
             async with semaphore:
                 # entry.path is the full path, extract just the filename
                 filename = entry.path.split("/")[-1]
@@ -1434,16 +1456,25 @@ async def show_volume_stats(language: str) -> None:
                 if content:
                     try:
                         patches = json.loads(content)
-                        return (repo_id, len(patches))
+                        return (repo_id, len(patches), patches)
                     except json.JSONDecodeError:
                         pass
-                return (repo_id, 0)
+                return (repo_id, 0, [])
         
         results = await asyncio.gather(*[read_patches(e) for e in patch_files])
-        for repo_id, count in results:
+        for repo_id, count, patches in results:
             if repo_id not in repo_stats:
                 repo_stats[repo_id] = {"generated": 0, "validated": 0, "valid": 0}
             repo_stats[repo_id]["generated"] = count
+            
+            # Count generated bugs by modifier
+            for patch in patches:
+                instance_id = patch.get("instance_id", "")
+                modifier = extract_modifier(instance_id)
+                if modifier not in modifier_stats:
+                    modifier_stats[modifier] = {"generated": 0, "validated": 0, "valid": 0}
+                modifier_stats[modifier]["generated"] += 1
+                
         print(f"  Found {len(patch_files)} repos with patches")
     except Exception as e:
         print(f"Warning: Could not read bug_gen directory: {e}")
@@ -1453,10 +1484,10 @@ async def show_volume_stats(language: str) -> None:
     try:
         repo_entries = await logs_volume.listdir.aio(run_validation_dir)
         
-        # First, collect all report.json paths to read
-        all_report_paths: list[tuple[str, str]] = []  # (repo_id, report_path)
+        # First, collect all report.json paths to read (with instance_id for modifier extraction)
+        all_report_paths: list[tuple[str, str, str]] = []  # (repo_id, report_path, instance_id)
         
-        async def list_repo_instances(repo_entry) -> list[tuple[str, str]]:
+        async def list_repo_instances(repo_entry) -> list[tuple[str, str, str]]:
             """List all instance report paths for a repo."""
             async with semaphore:
                 # entry.path is full path like "javascript/run_validation/repo_id"
@@ -1470,7 +1501,7 @@ async def show_volume_stats(language: str) -> None:
                         instance_id = instance_entry.path.split("/")[-1]
                         if not instance_id.endswith(".ref"):
                             report_path = f"{instance_entry.path}/report.json"
-                            paths.append((repo_id, report_path))
+                            paths.append((repo_id, report_path, instance_id))
                 except Exception:
                     pass
                 return paths
@@ -1490,10 +1521,11 @@ async def show_volume_stats(language: str) -> None:
                 repo_stats[repo_id] = {"generated": 0, "validated": 0, "valid": 0}
         
         # Read all reports in parallel
-        async def read_report(item: tuple[str, str]) -> tuple[str, bool, bool]:
-            """Read a report and return (repo_id, is_validated, is_valid)."""
+        async def read_report(item: tuple[str, str, str]) -> tuple[str, str, bool, bool]:
+            """Read a report and return (repo_id, modifier, is_validated, is_valid)."""
             async with semaphore:
-                repo_id, report_path = item
+                repo_id, report_path, instance_id = item
+                modifier = extract_modifier(instance_id)
                 content = await volume_read_text(report_path)
                 if content:
                     try:
@@ -1501,23 +1533,31 @@ async def show_volume_stats(language: str) -> None:
                         if isinstance(report, dict):
                             p2f = report.get("PASS_TO_FAIL")
                             is_valid = p2f and len(p2f) > 0
-                            return (repo_id, True, is_valid)
+                            return (repo_id, modifier, True, is_valid)
                     except json.JSONDecodeError:
                         pass
-                return (repo_id, False, False)
+                return (repo_id, modifier, False, False)
         
         report_results = await asyncio.gather(*[read_report(item) for item in all_report_paths])
-        for repo_id, is_validated, is_valid in report_results:
+        for repo_id, modifier, is_validated, is_valid in report_results:
             if is_validated:
                 repo_stats[repo_id]["validated"] += 1
                 if is_valid:
                     repo_stats[repo_id]["valid"] += 1
+                
+                # Track modifier stats
+                if modifier not in modifier_stats:
+                    modifier_stats[modifier] = {"generated": 0, "validated": 0, "valid": 0}
+                modifier_stats[modifier]["validated"] += 1
+                if is_valid:
+                    modifier_stats[modifier]["valid"] += 1
         
     except Exception as e:
         print(f"Warning: Could not read run_validation directory: {e}")
     
     # 3. Print formatted output
     import re
+    import statistics
     
     def truncate_repo_name(repo_id: str) -> str:
         """Remove the commit hash suffix (e.g., '.3ec3512d') and replace __ with /."""
@@ -1526,80 +1566,99 @@ async def show_volume_stats(language: str) -> None:
         # Replace __ with / for display
         return name.replace('__', '/')
     
-    # Build display names and calculate max width
-    display_names = {repo_id: truncate_repo_name(repo_id) for repo_id in repo_stats.keys()}
-    max_name_len = max(len(name) for name in display_names.values()) if display_names else 10
-    max_name_len = max(max_name_len, len("Repository"))  # At least as wide as header
+    def calc_stats(values: list[float]) -> tuple[float, float, float, float, float]:
+        """Calculate mean, std, min, median, max for a list of values."""
+        if not values:
+            return (0, 0, 0, 0, 0)
+        mean = statistics.mean(values)
+        std = statistics.stdev(values) if len(values) > 1 else 0
+        min_val = min(values)
+        median = statistics.median(values)
+        max_val = max(values)
+        return (mean, std, min_val, median, max_val)
     
-    total_width = max_name_len + 3 + 6 + 3 + 6 + 3 + 6 + 3 + 8  # name + separators + columns
-    
-    print(f"{'Repository':<{max_name_len}} | {'Gen':>6} | {'Val':>6} | {'Valid':>6} | {'Pass%':>8}")
-    print("-" * total_width)
-    
-    total_gen = 0
-    total_val = 0
-    total_valid = 0
-    
-    # Collect per-repo values for statistics
-    gen_values = []
-    val_values = []
-    valid_values = []
-    pass_rate_values = []
-    
-    for repo_id, stats in sorted(repo_stats.items()):
-        gen = stats["generated"]
-        val = stats["validated"]
-        valid = stats["valid"]
+    def print_stats_table(
+        header: str,
+        stats_dict: dict[str, dict[str, int]],
+        display_names: dict[str, str] | None = None
+    ) -> None:
+        """Print a formatted stats table with totals and statistics."""
+        if display_names is None:
+            display_names = {k: k for k in stats_dict.keys()}
         
-        total_gen += gen
-        total_val += val
-        total_valid += valid
+        max_name_len = max(len(name) for name in display_names.values()) if display_names else 10
+        max_name_len = max(max_name_len, len(header))  # At least as wide as header
         
-        pass_rate = (valid / val * 100) if val > 0 else 0
+        total_width = max_name_len + 3 + 6 + 3 + 6 + 3 + 6 + 3 + 8  # name + separators + columns
         
-        gen_values.append(gen)
-        val_values.append(val)
-        valid_values.append(valid)
-        pass_rate_values.append(pass_rate)
+        print(f"{header:<{max_name_len}} | {'Gen':>6} | {'Val':>6} | {'Valid':>6} | {'Pass%':>8}")
+        print("-" * total_width)
         
-        display_name = display_names[repo_id]
-        print(f"{display_name:<{max_name_len}} | {gen:>6} | {val:>6} | {valid:>6} | {pass_rate:>7.1f}%")
-    
-    print("-" * total_width)
-    total_pass_rate = (total_valid / total_val * 100) if total_val > 0 else 0
-    print(f"{'TOTAL':<{max_name_len}} | {total_gen:>6} | {total_val:>6} | {total_valid:>6} | {total_pass_rate:>7.1f}%")
-    
-    # Calculate and print statistics (mean, std, min, median, max)
-    if len(repo_stats) > 0:
-        import statistics
+        total_gen = 0
+        total_val = 0
+        total_valid = 0
         
-        def calc_stats(values: list[float]) -> tuple[float, float, float, float, float]:
-            """Calculate mean, std, min, median, max for a list of values."""
-            if not values:
-                return (0, 0, 0, 0, 0)
-            mean = statistics.mean(values)
-            std = statistics.stdev(values) if len(values) > 1 else 0
-            min_val = min(values)
-            median = statistics.median(values)
-            max_val = max(values)
-            return (mean, std, min_val, median, max_val)
+        # Collect per-item values for statistics
+        gen_values = []
+        val_values = []
+        valid_values = []
+        pass_rate_values = []
         
-        gen_stats = calc_stats(gen_values)
-        val_stats = calc_stats(val_values)
-        valid_stats = calc_stats(valid_values)
-        pass_stats = calc_stats(pass_rate_values)
+        for item_id, stats in sorted(stats_dict.items()):
+            gen = stats["generated"]
+            val = stats["validated"]
+            valid = stats["valid"]
+            
+            total_gen += gen
+            total_val += val
+            total_valid += valid
+            
+            pass_rate = (valid / val * 100) if val > 0 else 0
+            
+            gen_values.append(gen)
+            val_values.append(val)
+            valid_values.append(valid)
+            pass_rate_values.append(pass_rate)
+            
+            display_name = display_names.get(item_id, item_id)
+            print(f"{display_name:<{max_name_len}} | {gen:>6} | {val:>6} | {valid:>6} | {pass_rate:>7.1f}%")
         
         print("-" * total_width)
-        print(f"{'MEAN':<{max_name_len}} | {gen_stats[0]:>6.1f} | {val_stats[0]:>6.1f} | {valid_stats[0]:>6.1f} | {pass_stats[0]:>7.1f}%")
-        print(f"{'STD':<{max_name_len}} | {gen_stats[1]:>6.1f} | {val_stats[1]:>6.1f} | {valid_stats[1]:>6.1f} | {pass_stats[1]:>7.1f}%")
-        print(f"{'MIN':<{max_name_len}} | {gen_stats[2]:>6.0f} | {val_stats[2]:>6.0f} | {valid_stats[2]:>6.0f} | {pass_stats[2]:>7.1f}%")
-        print(f"{'MEDIAN':<{max_name_len}} | {gen_stats[3]:>6.1f} | {val_stats[3]:>6.1f} | {valid_stats[3]:>6.1f} | {pass_stats[3]:>7.1f}%")
-        print(f"{'MAX':<{max_name_len}} | {gen_stats[4]:>6.0f} | {val_stats[4]:>6.0f} | {valid_stats[4]:>6.0f} | {pass_stats[4]:>7.1f}%")
+        total_pass_rate = (total_valid / total_val * 100) if total_val > 0 else 0
+        print(f"{'TOTAL':<{max_name_len}} | {total_gen:>6} | {total_val:>6} | {total_valid:>6} | {total_pass_rate:>7.1f}%")
+        
+        # Calculate and print statistics (mean, std, min, median, max)
+        if len(stats_dict) > 0:
+            gen_stats = calc_stats(gen_values)
+            val_stats = calc_stats(val_values)
+            valid_stats = calc_stats(valid_values)
+            pass_stats = calc_stats(pass_rate_values)
+            
+            print("-" * total_width)
+            print(f"{'MEAN':<{max_name_len}} | {gen_stats[0]:>6.1f} | {val_stats[0]:>6.1f} | {valid_stats[0]:>6.1f} | {pass_stats[0]:>7.1f}%")
+            print(f"{'STD':<{max_name_len}} | {gen_stats[1]:>6.1f} | {val_stats[1]:>6.1f} | {valid_stats[1]:>6.1f} | {pass_stats[1]:>7.1f}%")
+            print(f"{'MIN':<{max_name_len}} | {gen_stats[2]:>6.0f} | {val_stats[2]:>6.0f} | {valid_stats[2]:>6.0f} | {pass_stats[2]:>7.1f}%")
+            print(f"{'MEDIAN':<{max_name_len}} | {gen_stats[3]:>6.1f} | {val_stats[3]:>6.1f} | {valid_stats[3]:>6.1f} | {pass_stats[3]:>7.1f}%")
+            print(f"{'MAX':<{max_name_len}} | {gen_stats[4]:>6.0f} | {val_stats[4]:>6.0f} | {valid_stats[4]:>6.0f} | {pass_stats[4]:>7.1f}%")
+    
+    # Print Repository table
+    display_names = {repo_id: truncate_repo_name(repo_id) for repo_id in repo_stats.keys()}
+    print_stats_table("Repository", repo_stats, display_names)
     
     # Count repos with >0 valid bugs
     repos_with_valid_bugs = sum(1 for stats in repo_stats.values() if stats["valid"] > 0)
     print(f"\nNumber of repos with >0 valid bugs: {repos_with_valid_bugs}")
     print(f"Total repos processed: {len(repo_stats)}")
+    
+    # Print Modifier table
+    if modifier_stats:
+        print(f"\n{'='*60}\n")
+        print_stats_table("Modifier", modifier_stats)
+        
+        # Count modifiers with >0 valid bugs
+        modifiers_with_valid_bugs = sum(1 for stats in modifier_stats.values() if stats["valid"] > 0)
+        print(f"\nNumber of modifiers with >0 valid bugs: {modifiers_with_valid_bugs}")
+        print(f"Total modifiers: {len(modifier_stats)}")
 
 
 # ============================================================================
