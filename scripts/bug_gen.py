@@ -1404,6 +1404,149 @@ def print_summary(results: list[dict], repos_count: int):
 
 
 # ============================================================================
+# Stats Display
+# ============================================================================
+
+async def show_volume_stats(language: str) -> None:
+    """Display a bug breakdown by reading validation results from the Modal Volume.
+    
+    Similar to count_bugs_to_file.py but reads from Modal Volume instead of local files.
+    Uses parallel I/O for faster stats collection.
+    """
+    print(f"\nReading stats from volume '{VOLUME_NAME}/{language}/'...\n")
+    
+    repo_stats: dict[str, dict[str, int]] = {}
+    semaphore = asyncio.Semaphore(100)  # Limit concurrent reads
+    
+    # 1. Count generated bugs from patches files (parallel)
+    bug_gen_dir = f"{language}/bug_gen"
+    try:
+        entries = await logs_volume.listdir.aio(bug_gen_dir)
+        patch_files = [e for e in entries if e.path.endswith("_all_patches.json")]
+        
+        async def read_patches(entry) -> tuple[str, int]:
+            async with semaphore:
+                # entry.path is the full path, extract just the filename
+                filename = entry.path.split("/")[-1]
+                repo_id = filename.replace("_all_patches.json", "")
+                # Use entry.path directly as it's the full path
+                content = await volume_read_text(entry.path)
+                if content:
+                    try:
+                        patches = json.loads(content)
+                        return (repo_id, len(patches))
+                    except json.JSONDecodeError:
+                        pass
+                return (repo_id, 0)
+        
+        results = await asyncio.gather(*[read_patches(e) for e in patch_files])
+        for repo_id, count in results:
+            if repo_id not in repo_stats:
+                repo_stats[repo_id] = {"generated": 0, "validated": 0, "valid": 0}
+            repo_stats[repo_id]["generated"] = count
+        print(f"  Found {len(patch_files)} repos with patches")
+    except Exception as e:
+        print(f"Warning: Could not read bug_gen directory: {e}")
+    
+    # 2. Count validated bugs from run_validation directory (parallel)
+    run_validation_dir = f"{language}/run_validation"
+    try:
+        repo_entries = await logs_volume.listdir.aio(run_validation_dir)
+        
+        # First, collect all report.json paths to read
+        all_report_paths: list[tuple[str, str]] = []  # (repo_id, report_path)
+        
+        async def list_repo_instances(repo_entry) -> list[tuple[str, str]]:
+            """List all instance report paths for a repo."""
+            async with semaphore:
+                # entry.path is full path like "javascript/run_validation/repo_id"
+                repo_id = repo_entry.path.split("/")[-1]
+                repo_path = repo_entry.path  # Use full path directly
+                paths = []
+                try:
+                    instance_entries = await logs_volume.listdir.aio(repo_path)
+                    for instance_entry in instance_entries:
+                        # instance_entry.path is full path
+                        instance_id = instance_entry.path.split("/")[-1]
+                        if not instance_id.endswith(".ref"):
+                            report_path = f"{instance_entry.path}/report.json"
+                            paths.append((repo_id, report_path))
+                except Exception:
+                    pass
+                return paths
+        
+        # Gather all report paths in parallel
+        repo_entries_filtered = [e for e in repo_entries if not e.path.endswith("/")]
+        path_results = await asyncio.gather(*[list_repo_instances(e) for e in repo_entries_filtered])
+        for paths in path_results:
+            all_report_paths.extend(paths)
+        
+        print(f"  Found {len(all_report_paths)} validation reports to check")
+        
+        # Initialize repo_stats for all repos
+        for repo_entry in repo_entries_filtered:
+            repo_id = repo_entry.path.split("/")[-1]
+            if repo_id not in repo_stats:
+                repo_stats[repo_id] = {"generated": 0, "validated": 0, "valid": 0}
+        
+        # Read all reports in parallel
+        async def read_report(item: tuple[str, str]) -> tuple[str, bool, bool]:
+            """Read a report and return (repo_id, is_validated, is_valid)."""
+            async with semaphore:
+                repo_id, report_path = item
+                content = await volume_read_text(report_path)
+                if content:
+                    try:
+                        report = json.loads(content)
+                        if isinstance(report, dict):
+                            p2f = report.get("PASS_TO_FAIL")
+                            is_valid = p2f and len(p2f) > 0
+                            return (repo_id, True, is_valid)
+                    except json.JSONDecodeError:
+                        pass
+                return (repo_id, False, False)
+        
+        report_results = await asyncio.gather(*[read_report(item) for item in all_report_paths])
+        for repo_id, is_validated, is_valid in report_results:
+            if is_validated:
+                repo_stats[repo_id]["validated"] += 1
+                if is_valid:
+                    repo_stats[repo_id]["valid"] += 1
+        
+    except Exception as e:
+        print(f"Warning: Could not read run_validation directory: {e}")
+    
+    # 3. Print formatted output
+    print(f"{'Repository':<60} | {'Gen':>6} | {'Val':>6} | {'Valid':>6} | {'Pass%':>8}")
+    print("-" * 95)
+    
+    total_gen = 0
+    total_val = 0
+    total_valid = 0
+    
+    for repo_id, stats in sorted(repo_stats.items()):
+        gen = stats["generated"]
+        val = stats["validated"]
+        valid = stats["valid"]
+        
+        total_gen += gen
+        total_val += val
+        total_valid += valid
+        
+        pass_rate = (valid / val * 100) if val > 0 else 0
+        print(f"{repo_id:<60} | {gen:>6} | {val:>6} | {valid:>6} | {pass_rate:>7.1f}%")
+    
+    print("-" * 95)
+    total_pass_rate = (total_valid / total_val * 100) if total_val > 0 else 0
+    print(f"{'TOTAL':<60} | {total_gen:>6} | {total_val:>6} | {total_valid:>6} | {total_pass_rate:>7.1f}%")
+    
+    # Count repos with >0 valid bugs
+    repos_with_valid_bugs = sum(1 for stats in repo_stats.values() if stats["valid"] > 0)
+    print(f"\nNumber of repos with >0 valid bugs: {repos_with_valid_bugs}")
+    print(f"Total repos processed: {len(repo_stats)}")
+
+
+# ============================================================================
 # CLI & Main
 # ============================================================================
 
@@ -1416,6 +1559,7 @@ async def main(
     max_entities: int = 2000,
     max_candidates: int = 2000,
     max_concurrent_tests: int = 900,
+    show_stats: bool = False,
 ):
     """
     Modal Bug Generation & Validation script.
@@ -1434,7 +1578,13 @@ async def main(
         max_entities: Max entities to sample, -1 for all (default: 2000)
         max_candidates: Max candidates to process, -1 for all (default: 2000)
         max_concurrent_tests: Max concurrent tests (default: 900)
+        show_stats: If True, show bug breakdown stats and exit without running generation/validation
     """
+    # Handle --show-stats early exit
+    if show_stats:
+        await show_volume_stats(language)
+        return
+    
     from swesmith.constants import ENV_NAME
     
     # Parse repos (comma-separated string to list)
