@@ -1517,8 +1517,24 @@ async def show_volume_stats(language: str) -> None:
         print(f"Warning: Could not read run_validation directory: {e}")
     
     # 3. Print formatted output
-    print(f"{'Repository':<60} | {'Gen':>6} | {'Val':>6} | {'Valid':>6} | {'Pass%':>8}")
-    print("-" * 95)
+    import re
+    
+    def truncate_repo_name(repo_id: str) -> str:
+        """Remove the commit hash suffix (e.g., '.3ec3512d') and replace __ with /."""
+        # Pattern matches a dot followed by 8 hex characters at the end
+        name = re.sub(r'\.[a-f0-9]{8}$', '', repo_id)
+        # Replace __ with / for display
+        return name.replace('__', '/')
+    
+    # Build display names and calculate max width
+    display_names = {repo_id: truncate_repo_name(repo_id) for repo_id in repo_stats.keys()}
+    max_name_len = max(len(name) for name in display_names.values()) if display_names else 10
+    max_name_len = max(max_name_len, len("Repository"))  # At least as wide as header
+    
+    total_width = max_name_len + 3 + 6 + 3 + 6 + 3 + 6 + 3 + 8  # name + separators + columns
+    
+    print(f"{'Repository':<{max_name_len}} | {'Gen':>6} | {'Val':>6} | {'Valid':>6} | {'Pass%':>8}")
+    print("-" * total_width)
     
     total_gen = 0
     total_val = 0
@@ -1546,11 +1562,12 @@ async def show_volume_stats(language: str) -> None:
         valid_values.append(valid)
         pass_rate_values.append(pass_rate)
         
-        print(f"{repo_id:<60} | {gen:>6} | {val:>6} | {valid:>6} | {pass_rate:>7.1f}%")
+        display_name = display_names[repo_id]
+        print(f"{display_name:<{max_name_len}} | {gen:>6} | {val:>6} | {valid:>6} | {pass_rate:>7.1f}%")
     
-    print("-" * 95)
+    print("-" * total_width)
     total_pass_rate = (total_valid / total_val * 100) if total_val > 0 else 0
-    print(f"{'TOTAL':<60} | {total_gen:>6} | {total_val:>6} | {total_valid:>6} | {total_pass_rate:>7.1f}%")
+    print(f"{'TOTAL':<{max_name_len}} | {total_gen:>6} | {total_val:>6} | {total_valid:>6} | {total_pass_rate:>7.1f}%")
     
     # Calculate and print statistics (mean, std, min, median, max)
     if len(repo_stats) > 0:
@@ -1572,12 +1589,12 @@ async def show_volume_stats(language: str) -> None:
         valid_stats = calc_stats(valid_values)
         pass_stats = calc_stats(pass_rate_values)
         
-        print("-" * 95)
-        print(f"{'MEAN':<60} | {gen_stats[0]:>6.1f} | {val_stats[0]:>6.1f} | {valid_stats[0]:>6.1f} | {pass_stats[0]:>7.1f}%")
-        print(f"{'STD':<60} | {gen_stats[1]:>6.1f} | {val_stats[1]:>6.1f} | {valid_stats[1]:>6.1f} | {pass_stats[1]:>7.1f}%")
-        print(f"{'MIN':<60} | {gen_stats[2]:>6.0f} | {val_stats[2]:>6.0f} | {valid_stats[2]:>6.0f} | {pass_stats[2]:>7.1f}%")
-        print(f"{'MEDIAN':<60} | {gen_stats[3]:>6.1f} | {val_stats[3]:>6.1f} | {valid_stats[3]:>6.1f} | {pass_stats[3]:>7.1f}%")
-        print(f"{'MAX':<60} | {gen_stats[4]:>6.0f} | {val_stats[4]:>6.0f} | {valid_stats[4]:>6.0f} | {pass_stats[4]:>7.1f}%")
+        print("-" * total_width)
+        print(f"{'MEAN':<{max_name_len}} | {gen_stats[0]:>6.1f} | {val_stats[0]:>6.1f} | {valid_stats[0]:>6.1f} | {pass_stats[0]:>7.1f}%")
+        print(f"{'STD':<{max_name_len}} | {gen_stats[1]:>6.1f} | {val_stats[1]:>6.1f} | {valid_stats[1]:>6.1f} | {pass_stats[1]:>7.1f}%")
+        print(f"{'MIN':<{max_name_len}} | {gen_stats[2]:>6.0f} | {val_stats[2]:>6.0f} | {valid_stats[2]:>6.0f} | {pass_stats[2]:>7.1f}%")
+        print(f"{'MEDIAN':<{max_name_len}} | {gen_stats[3]:>6.1f} | {val_stats[3]:>6.1f} | {valid_stats[3]:>6.1f} | {pass_stats[3]:>7.1f}%")
+        print(f"{'MAX':<{max_name_len}} | {gen_stats[4]:>6.0f} | {val_stats[4]:>6.0f} | {valid_stats[4]:>6.0f} | {pass_stats[4]:>7.1f}%")
     
     # Count repos with >0 valid bugs
     repos_with_valid_bugs = sum(1 for stats in repo_stats.values() if stats["valid"] > 0)
