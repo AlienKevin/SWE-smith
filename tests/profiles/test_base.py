@@ -52,10 +52,13 @@ def test_repo_profile_clone():
     repo_profile = registry.get("mewwts__addict.75284f95")
 
     # Test with default dest (should use repo_name)
+    # Patch GITHUB_TOKEN to None to ensure SSH URL format is used
     expected_dest = repo_profile.repo_name
     expected_cmd = f"git clone git@github.com:{repo_profile.mirror_name}.git {repo_profile.repo_name}"
 
     with (
+        patch.dict(os.environ, {}, clear=False),
+        patch("os.getenv", return_value=None),
         patch("os.path.exists", return_value=False) as mock_exists,
         patch("subprocess.run") as mock_run,
     ):
@@ -78,6 +81,8 @@ def test_repo_profile_clone():
     )
 
     with (
+        patch.dict(os.environ, {}, clear=False),
+        patch("os.getenv", return_value=None),
         patch("os.path.exists", return_value=False) as mock_exists,
         patch("subprocess.run") as mock_run,
     ):
