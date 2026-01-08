@@ -781,13 +781,13 @@ async def run_validation_in_sandbox(
             config_json = json.dumps(postgold_config)
             script_lines.extend(
                 [
-                    f"cat > /tmp/config.json << 'CONFIG_EOF'",
+                    "cat > /tmp/config.json << 'CONFIG_EOF'",
                     config_json,
                     "CONFIG_EOF",
-                    f"cat > /tmp/validator.py << 'SCRIPT_EOF'",
+                    "cat > /tmp/validator.py << 'SCRIPT_EOF'",
                     REMOTE_VALIDATOR_SCRIPT,
                     "SCRIPT_EOF",
-                    f"python3 /tmp/validator.py /tmp/config.json",
+                    "python3 /tmp/validator.py /tmp/config.json",
                 ]
             )
         else:
@@ -1206,7 +1206,7 @@ async def run_pregold_phase_async(
     from swesmith.harness.grading import read_test_output
     from swebench.harness.constants import TestStatus
 
-    print(f"\nPHASE: PRE-GOLD (BASELINE) TESTS")
+    print("\nPHASE: PRE-GOLD (BASELINE) TESTS")
     print(
         f"Running {len(repos_with_patches)} baselines, max concurrent: {max_concurrent}"
     )
@@ -1337,7 +1337,7 @@ async def run_pregold_phase_async(
                             if s == TestStatus.PASSED.value
                         )
                         if passed == 0:
-                            status = f"⚠️ 0 tests passed (skipping post-gold)"
+                            status = "⚠️ 0 tests passed (skipping post-gold)"
                             failed_repos.add(task["repo"])
                             await volume_write_text(
                                 f"{volume_baseline_dir}/error.txt",
@@ -1405,9 +1405,8 @@ async def run_postgold_phase_async(
     - ThreadPoolExecutor with 1000 workers = 1000 threads = high memory/CPU overhead
     - asyncio with semaphore = 1 thread + event loop = minimal overhead
     """
-    from swesmith.harness.grading import get_valid_report
 
-    print(f"PHASE: POST-GOLD TESTS")
+    print("PHASE: POST-GOLD TESTS")
     print(f"Running {len(all_patches)} patches, max concurrent: {max_concurrent}")
 
     # Parallelize volume existence checks to avoid slow sequential roundtrips using asyncio
@@ -2006,7 +2005,7 @@ async def main(
 
     # Phase 2: Validation - collect ALL patches from volume (not just from this run)
     print(f"\n{'#' * 60}")
-    print(f"# PHASE 2: VALIDATION")
+    print("# PHASE 2: VALIDATION")
     print(f"{'#' * 60}\n")
 
     print("Collecting patches from volume...")

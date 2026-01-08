@@ -193,6 +193,7 @@ if __name__ == "__main__":
         help="Name of a SWE-smith repository to generate bugs for.",
     )
     parser.add_argument(
+        "-s",
         "--seed",
         type=int,
         default=24,
@@ -205,6 +206,7 @@ if __name__ == "__main__":
         help="Maximum number of bugs to generate.",
     )
     parser.add_argument(
+        "-i",
         "--interleave",
         action="store_true",
         help="Randomize and interleave modifiers instead of processing sequentially.",
@@ -222,6 +224,7 @@ if __name__ == "__main__":
         help="Maximum number of (candidate, modifier) pairs to process. Set to -1 to process all.",
     )
     parser.add_argument(
+        "-t",
         "--timeout_seconds",
         type=int,
         default=None,
