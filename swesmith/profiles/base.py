@@ -66,7 +66,7 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
     org_gh: str = ORG_NAME_GH
     arch: str = "x86_64" if platform.machine() not in {"aarch64", "arm64"} else "arm64"
     pltf: str = "linux/x86_64" if arch == "x86_64" else "linux/arm64/v8"
-    exts: list[str] = field(default_factory=list)  # Set by extract_entities if not provided
+    exts: list[str] = field(default_factory=list)  # Must be set by subclass
     eval_sets: set[str] = field(default_factory=set)
 
     # Install + Test specifications
@@ -311,10 +311,12 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
             List[CodeEntity]: List of CodeEntity objects containing entity information.
         """
         # Lazy import to avoid loading tree-sitter dependencies when not needed
-        from swesmith.bug_gen.adapters import get_entities_from_file, SUPPORTED_EXTS
+        from swesmith.bug_gen.adapters import get_entities_from_file
 
-        # Use SUPPORTED_EXTS if exts was not explicitly set
-        exts = self.exts if self.exts else SUPPORTED_EXTS
+        if not self.exts:
+            raise ValueError(
+                f"RepoProfile subclass {self.__class__.__name__} must provide 'exts' list for entity extraction."
+            )
 
         dir_path, cloned = self.clone()
         entities = []
@@ -335,7 +337,7 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
                     continue
 
                 file_ext = Path(file_path).suffix
-                if file_ext not in exts:
+                if file_ext not in self.exts:
                     continue
                 get_entities_from_file[file_ext](entities, file_path, max_entities)
         if cloned:
