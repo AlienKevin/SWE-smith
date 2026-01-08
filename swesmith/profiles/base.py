@@ -29,6 +29,7 @@ from swebench.harness.constants import (
     FAIL_TO_PASS,
     KEY_INSTANCE_ID,
 )
+from swesmith.bug_gen.adapters import get_entities_from_file, SUPPORTED_EXTS
 from swesmith.constants import (
     KEY_PATCH,
     LOG_DIR_ENV,
@@ -310,12 +311,6 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
         Returns:
             List[CodeEntity]: List of CodeEntity objects containing entity information.
         """
-        # Lazy import to avoid loading tree-sitter dependencies when not needed
-        from swesmith.bug_gen.adapters import get_entities_from_file, SUPPORTED_EXTS
-
-        # Use SUPPORTED_EXTS if exts was not explicitly set
-        exts = self.exts if self.exts else SUPPORTED_EXTS
-
         dir_path, cloned = self.clone()
         entities = []
         for root, _, files in os.walk(dir_path):
@@ -335,7 +330,7 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
                     continue
 
                 file_ext = Path(file_path).suffix
-                if file_ext not in exts:
+                if file_ext not in self.exts:
                     continue
                 get_entities_from_file[file_ext](entities, file_path, max_entities)
         if cloned:

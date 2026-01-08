@@ -1,4 +1,3 @@
-import re
 import pytest
 from swesmith.bug_gen.adapters.javascript import get_entities_from_file_js
 from swesmith.bug_gen.procedural.javascript.remove import (
