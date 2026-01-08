@@ -1,6 +1,6 @@
 import re
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from swebench.harness.constants import TestStatus
 from swesmith.constants import ENV_NAME
 from swesmith.profiles.base import RepoProfile, registry
@@ -11,6 +11,8 @@ class CppProfile(RepoProfile):
     """
     Profile for C++ repositories.
     """
+
+    exts: list[str] = field(default_factory=lambda: [".cpp"])
 
 
 @dataclass

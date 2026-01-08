@@ -12,6 +12,8 @@ class CProfile(RepoProfile):
     Profile for C repositories.
     """
 
+    exts: list[str] = field(default_factory=lambda: [".c"])
+
 
 @dataclass
 class Jqb9e19de76(CProfile):
