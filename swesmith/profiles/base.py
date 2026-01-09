@@ -29,7 +29,6 @@ from swebench.harness.constants import (
     FAIL_TO_PASS,
     KEY_INSTANCE_ID,
 )
-from swesmith.bug_gen.adapters import get_entities_from_file, SUPPORTED_EXTS
 from swesmith.constants import (
     KEY_PATCH,
     LOG_DIR_ENV,
@@ -67,7 +66,7 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
     org_gh: str = ORG_NAME_GH
     arch: str = "x86_64" if platform.machine() not in {"aarch64", "arm64"} else "arm64"
     pltf: str = "linux/x86_64" if arch == "x86_64" else "linux/arm64/v8"
-    exts: list[str] = field(default_factory=lambda: SUPPORTED_EXTS)
+    exts: list[str] = field(default_factory=list)  # Must be set by subclass
     eval_sets: set[str] = field(default_factory=set)
 
     # Install + Test specifications
@@ -311,6 +310,14 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
         Returns:
             List[CodeEntity]: List of CodeEntity objects containing entity information.
         """
+        # Lazy import to avoid loading tree-sitter dependencies when not needed
+        from swesmith.bug_gen.adapters import get_entities_from_file
+
+        if not self.exts:
+            raise ValueError(
+                f"RepoProfile subclass {self.__class__.__name__} must provide 'exts' list for entity extraction."
+            )
+
         dir_path, cloned = self.clone()
         entities = []
         for root, _, files in os.walk(dir_path):

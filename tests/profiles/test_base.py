@@ -401,6 +401,7 @@ class MockRepoProfile(RepoProfile):
         self.test_cmd = "pytest"
         self.min_testing = True
         self._test_dir = test_dir
+        self.exts = [".py"]
 
     def build_image(self):
         pass

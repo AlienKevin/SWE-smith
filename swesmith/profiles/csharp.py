@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from swebench.harness.constants import TestStatus
 from swesmith.constants import ENV_NAME
 from swesmith.profiles.base import RepoProfile, registry
@@ -9,6 +9,8 @@ class CSharpProfile(RepoProfile):
     """
     Profile for CSharp repositories.
     """
+
+    exts: list[str] = field(default_factory=lambda: [".cs"])
 
 
 @dataclass
