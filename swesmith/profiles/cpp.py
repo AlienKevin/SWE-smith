@@ -166,6 +166,10 @@ class Eigen9b00db8c(CppProfile):
         1800  # 30 minutes - Eigen test suite is large and can take a long time
     )
     timeout_ref: int = 3600  # 60 minutes for reference runs
+    
+    @property
+    def clone_url(self) -> str:
+        return "https://gitlab.com/libeigen/eigen.git"
 
     @property
     def dockerfile(self):

@@ -134,6 +134,11 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
         return f"{self.owner}__{self.repo}.{self.commit[:8]}"
 
     @property
+    def clone_url(self) -> str:
+        """The URL to clone the original repository from."""
+        return f"git@github.com:{self.owner}/{self.repo}.git"
+
+    @property
     def branches(self):
         """Get task instance branches corresponding to this repo"""
         if self._cache_branches is None:
@@ -211,7 +216,7 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
 
         # Clone the repository
         subprocess.run(
-            f"git clone git@github.com:{self.owner}/{self.repo}.git {self.repo_name}",
+            f"git clone {self.clone_url} {self.repo_name}",
             shell=True,
             check=True,
             stdout=subprocess.DEVNULL,
