@@ -81,7 +81,7 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
             raise ValueError(
                 f"Architecture {self.arch} not supported. Must be one of {[a.value for a in Architecture]}"
             )
-    
+
     exts: list[str] = field(default_factory=list)  # Must be set by subclass
     eval_sets: set[str] = field(default_factory=set)
 
