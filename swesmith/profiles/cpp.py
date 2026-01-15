@@ -21,8 +21,6 @@ class Catch29b3f508a(CppProfile):
     repo: str = "Catch2"
     commit: str = "9b3f508a1b1579f5366cf83d19822cb395f23528"
     test_cmd: str = "cd build && ctest"
-    org_dh: str = "jyangballin"  # Docker Hub username
-    org_gh: str = "jyangballin"  # GitHub username (for personal account)
 
     @property
     def dockerfile(self):
@@ -89,8 +87,6 @@ class Spdlog8806ca65(CppProfile):
     repo: str = "spdlog"
     commit: str = "8806ca6509f037cf7612ea292338e3b222209dc1"
     test_cmd: str = "cd build && ctest"
-    org_dh: str = "zhehaoli1999"  # Docker Hub username
-    org_gh: str = "zhehaoli1999"  # GitHub username (for personal account)
 
     @property
     def dockerfile(self):
@@ -170,8 +166,6 @@ class Eigen9b00db8c(CppProfile):
         1800  # 30 minutes - Eigen test suite is large and can take a long time
     )
     timeout_ref: int = 3600  # 60 minutes for reference runs
-    org_dh: str = "zhehaoli1999"  # Docker Hub username
-    org_gh: str = "zhehaoli1999"  # GitHub username (for personal account)
 
     @property
     def dockerfile(self):
@@ -254,8 +248,6 @@ class FmtEc73fb72(CppProfile):
     test_cmd: str = "cd build && ctest"
     timeout: int = 600  # 10 minutes - fmt test suite is smaller than Eigen
     timeout_ref: int = 1200  # 20 minutes for reference runs
-    org_dh: str = "cs329a-swesmith-repos"  # Docker Hub username
-    org_gh: str = "cs329a-swesmith-repos"  # GitHub username (for personal account)
 
     @property
     def dockerfile(self):
