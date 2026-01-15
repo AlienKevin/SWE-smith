@@ -90,21 +90,13 @@ class Spdlog8806ca65(CppProfile):
 
     @property
     def dockerfile(self):
-        # DEBUG: Print the full mirror URL
-        mirror_url = f"https://github.com/{self.mirror_name}"
-        print(f"[DEBUG] Mirror URL: {mirror_url}")
-        print(f"[DEBUG] Mirror name: {self.mirror_name}")
-        print(f"[DEBUG] Repo name: {self.repo_name}")
-        print(f"[DEBUG] Org GH: {self.org_gh}")
-
         return f"""FROM gcc:12
 RUN apt-get update && apt-get install -y \
     clang build-essential cmake \
     python3 python3-dev python3-pip
 
-# Clone the mirror repository to /testbed
-RUN git clone {mirror_url} /testbed
-WORKDIR /testbed
+RUN git clone https://github.com/{self.mirror_name} /{ENV_NAME}
+WORKDIR /{ENV_NAME}
 
 # Build and test spdlog
 RUN mkdir build && cd build \
@@ -173,23 +165,13 @@ class Eigen9b00db8c(CppProfile):
 
     @property
     def dockerfile(self):
-        # DEBUG: Print the full mirror URL
-        mirror_url = f"https://github.com/{self.mirror_name}"
-        print(f"[DEBUG] Mirror URL: {mirror_url}")
-        print(f"[DEBUG] Mirror name: {self.mirror_name}")
-        print(f"[DEBUG] Repo name: {self.repo_name}")
-        print(f"[DEBUG] Org GH: {self.org_gh}")
-
         return f"""FROM gcc:12
 RUN apt-get update && apt-get install -y \
     git clang build-essential cmake \
     python3 python3-dev python3-pip
 
-# Clone the mirror repository to /testbed
-RUN git clone https://gitlab.com/libeigen/eigen.git /testbed \
-    && cd /testbed \
-    && git checkout 9b00db8cb9154477b93b342cf418b5da5d7f58a0
-WORKDIR /testbed
+RUN git clone https://github.com/{self.mirror_name} /{ENV_NAME}
+WORKDIR /{ENV_NAME}
 
 
 # Build and test spdlog
@@ -255,23 +237,13 @@ class FmtEc73fb72(CppProfile):
 
     @property
     def dockerfile(self):
-        # DEBUG: Print the full mirror URL
-        mirror_url = f"https://github.com/{self.mirror_name}"
-        print(f"[DEBUG] Mirror URL: {mirror_url}")
-        print(f"[DEBUG] Mirror name: {self.mirror_name}")
-        print(f"[DEBUG] Repo name: {self.repo_name}")
-        print(f"[DEBUG] Org GH: {self.org_gh}")
-
         return f"""FROM gcc:12
 RUN apt-get update && apt-get install -y \
     git clang build-essential cmake \
     python3 python3-dev python3-pip
 
-# Clone the mirror repository to /testbed
-RUN git clone {mirror_url} /testbed \
-    && cd /testbed \
-    && git checkout {self.commit}
-WORKDIR /testbed
+RUN git clone https://github.com/{self.mirror_name} /{ENV_NAME}
+WORKDIR /{ENV_NAME}
 
 # Build and test fmt
 # FMT_TEST enables the test target (enabled by default when fmt is the master project)
