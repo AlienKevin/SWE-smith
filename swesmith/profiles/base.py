@@ -36,6 +36,7 @@ from swesmith.constants import (
     ORG_NAME_GH,
     INSTANCE_REF,
     CodeEntity,
+    Architecture,
 )
 from unidiff import PatchSet
 
@@ -64,8 +65,23 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
 
     org_dh: str = ORG_NAME_DH
     org_gh: str = ORG_NAME_GH
-    arch: str = "x86_64" if platform.machine() not in {"aarch64", "arm64"} else "arm64"
-    pltf: str = "linux/x86_64" if arch == "x86_64" else "linux/arm64/v8"
+    arch: str = (
+        Architecture.X86_64
+        if platform.machine() not in {"aarch64", "arm64"}
+        else Architecture.ARM64
+    )
+
+    @property
+    def pltf(self) -> str:
+        if self.arch == Architecture.X86_64:
+            return "linux/x86_64"
+        elif self.arch == Architecture.ARM64:
+            return "linux/arm64/v8"
+        else:
+            raise ValueError(
+                f"Architecture {self.arch} not supported. Must be one of {[a.value for a in Architecture]}"
+            )
+    
     exts: list[str] = field(default_factory=list)  # Must be set by subclass
     eval_sets: set[str] = field(default_factory=set)
 
@@ -194,7 +210,7 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
             f.write(self.dockerfile)
         with open(env_dir / "build_image.log", "w") as log_file:
             subprocess.run(
-                f"docker build -f {dockerfile_path} --no-cache -t {self.image_name} .",
+                f"docker build -f {dockerfile_path} --platform {self.pltf} --no-cache -t {self.image_name} .",
                 check=True,
                 shell=True,
                 stdout=log_file,

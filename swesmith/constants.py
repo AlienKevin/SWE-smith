@@ -44,6 +44,11 @@ GIT_APPLY_CMDS = [
 ]
 
 
+class Architecture(str, Enum):
+    X86_64 = "x86_64"
+    ARM64 = "arm64"
+
+
 class CodeProperty(Enum):
     # Core entity types
     IS_FUNCTION = "is_function"
