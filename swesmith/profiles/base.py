@@ -65,7 +65,7 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
 
     org_dh: str = ORG_NAME_DH
     org_gh: str = ORG_NAME_GH
-    arch: str = (
+    arch: Architecture = (
         Architecture.X86_64
         if platform.machine() not in {"aarch64", "arm64"}
         else Architecture.ARM64
