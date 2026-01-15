@@ -29,6 +29,17 @@ def apply_code_change(candidate: CodeEntity, bug: BugRewrite) -> None:
         for x in bug.rewrite.splitlines(keepends=True)
     ]
 
+    # Handle empty rewrite case - this indicates a bug in the modifier
+    if not change:
+        # Empty rewrite is unexpected - log and skip without crashing
+        import sys
+
+        print(
+            f"WARNING: Empty rewrite detected for {candidate.name} in {candidate.file_path}. Skipping.",
+            file=sys.stderr,
+        )
+        return
+
     # If the last line being replaced ends with one or more newlines,
     # ensure the last line of the replacement also end with the same number of newlines.
     curr_last_line = lines[candidate.line_end - 1]

@@ -1,5 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from swebench.harness.constants import TestStatus
+from swesmith.constants import ENV_NAME
 from swesmith.profiles.base import RepoProfile, registry
 
 
@@ -8,6 +9,8 @@ class CSharpProfile(RepoProfile):
     """
     Profile for CSharp repositories.
     """
+
+    exts: list[str] = field(default_factory=lambda: [".cs"])
 
 
 @dataclass
@@ -20,8 +23,8 @@ class VirtualClient0bb16489(CSharpProfile):
     @property
     def dockerfile(self):
         return f"""FROM mcr.microsoft.com/devcontainers/dotnet:dev-9.0-noble
-RUN git clone https://github.com/{self.mirror_name} /testbed
-WORKDIR /testbed
+RUN git clone https://github.com/{self.mirror_name} /{ENV_NAME}
+WORKDIR /{ENV_NAME}
 RUN chmod +x *.sh \
  && ./build.sh \
  && (./build-test.sh || true)

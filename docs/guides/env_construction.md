@@ -1,4 +1,7 @@
-SWE-smith enables automatic construction of execution environments for repositories.
+# Build Environments
+
+SWE-smith enables automatic conversion of code repositories into reinforcement learning environments.
+
 We'll review the two steps of this process:
 
 1. SWE-agent + LM attempts to install a repository + run the testing suite.
@@ -11,23 +14,16 @@ specifically at commit [`70c3acf`](https://github.com/Instagram/MonkeyType/tree/
 
 Coming soon!
 
+!!! note "Python installation scripts"
+
+    Early on in SWE-smith's development, we focused exclusively on Python repositories and wrote Python-specific scripts for automatic repo instllation.
+    More information [here](../guides/env_construction_py.md)
+
 ## Create an Execution Environment
-First, create the conda environment for the target repository.
-```bash
-python -m swesmith.build_repo.try_install_py Instagram/MonkeyType install_repo.sh \
-    --commit 70c3acf62950be5dfb28743c7a719bfdecebcd84
-```
-where `install_repo.sh` is the script that installs the repository.
-([Example](https://github.com/SWE-bench/SWE-smith/blob/main/configs/install_repo.sh))
-
-If successful, two artifacts will be produced under `logs/build_repo/records/`:
-* `sweenv_[repo + commit].yml`: A dump of the conda environment that was created.
-* `sweenv_[repo + commit].sh`: A log of the installation process.
-
-Next, run the following command to create a Docker image for the repository.
+Run the following command to create a Docker image for the repository.
 
 ```bash
-python -m swesmith.build_repo.create_images --repos Instagram/MonkeyType
+python -m swesmith.build_repo.create_images -r MonkeyType
 ```
 
 This command will create two artifacts:
@@ -36,9 +32,17 @@ This command will create two artifacts:
     * (If built from source) Change `ORG_NAME_GH` in `swesmith/constants.py`
 2. A Docker image (`swesmith.x86_64.<repo>.<commit>`) which contains the installed codebase.
 
+!!! note "`create_images` arguments"
+
+    By default, without `-r`, the command will build images for *all* SWE-smith repositories (300+ as of 12/2025).
+    
+    `-r`: Select specific repositories to build using fuzzy matching (e.g., `-r django` matches any repo containing "django").
+    
+    `-f`: Force rebuild images even if they already exist locally.
+
 It's good practice to check that your Docker image works as expected.
 ```bash
-docker run -it --rm swesmith.x86_64.instagram__monkeytype.70c3acf6
+docker run -it --rm swebench/swesmith.x86_64.instagram__monkeytype.70c3acf6
 ```
 Within the container, run the testing suite (e.g. `pytest`) to ensure that the codebase is functioning as expected.
 

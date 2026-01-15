@@ -2,6 +2,7 @@ import re
 
 from dataclasses import dataclass, field
 from swebench.harness.constants import TestStatus
+from swesmith.constants import ENV_NAME
 from swesmith.profiles.base import RepoProfile, registry
 
 
@@ -10,6 +11,8 @@ class CProfile(RepoProfile):
     """
     Profile for C repositories.
     """
+
+    exts: list[str] = field(default_factory=lambda: [".c"])
 
 
 @dataclass
@@ -34,8 +37,8 @@ RUN apt-get update \
     && apt-get install -y build-essential autoconf libtool git \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
-RUN git clone https://github.com/{self.mirror_name} /testbed
-WORKDIR /testbed
+RUN git clone https://github.com/{self.mirror_name} /{ENV_NAME}
+WORKDIR /{ENV_NAME}
 RUN git submodule update --init --recursive
 RUN autoreconf -i \
     && ./configure \
@@ -83,8 +86,8 @@ RUN apt update && \
     apt install -y pkg-config wget git build-essential libtool automake autoconf tcl bison flex cmake python3 python3-pip python3-venv python-is-python3 && \
     rm -rf /var/lib/apt/lists/*
 RUN adduser --disabled-password --gecos 'dog' nonroot
-RUN git clone https://github.com/{self.mirror_name} /testbed
-WORKDIR /testbed
+RUN git clone https://github.com/{self.mirror_name} /{ENV_NAME}
+WORKDIR /{ENV_NAME}
 RUN cd deps/jemalloc && ./autogen.sh
 RUN make distclean
 RUN make

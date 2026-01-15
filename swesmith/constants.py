@@ -26,7 +26,7 @@ LOG_DIR_RUN_VALIDATION = Path("logs/run_validation")
 LOG_DIR_TASKS = Path("logs/task_insts")
 LOG_TEST_OUTPUT_PRE_GOLD = "test_output_pre_gold.txt"
 MAX_INPUT_TOKENS = 128000
-ORG_NAME_DH = "jyangballin"
+ORG_NAME_DH = "swebench"
 ORG_NAME_GH = "swesmith"
 PREFIX_BUG = "bug"
 PREFIX_METADATA = "metadata"
@@ -73,6 +73,7 @@ class CodeProperty(Enum):
     # Operations by type
     HAS_BINARY_OP = "has_binary_op"
     HAS_BOOL_OP = "has_bool_op"
+    HAS_TERNARY = "has_ternary"
     HAS_UNARY_OP = "has_unary_op"
 
 

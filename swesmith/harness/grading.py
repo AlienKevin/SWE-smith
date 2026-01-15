@@ -19,7 +19,7 @@ from swesmith.profiles import registry
 
 
 def read_test_output(filename: str):
-    content = Path(filename).read_text()
+    content = Path(filename).read_text(errors="replace")
     if APPLY_PATCH_FAIL in content:
         return None, False
     if TESTS_TIMEOUT in content:

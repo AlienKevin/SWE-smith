@@ -20,7 +20,12 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
-dependencies = [
+# Base dependencies are empty to allow granular dependency groups for Modal images
+dependencies = []
+
+[project.optional-dependencies]
+# Full dependencies for local development
+all = [
     "astor",
     "datasets",
     "docker",
@@ -51,8 +56,6 @@ dependencies = [
     "textual",
     "tree-sitter-php>=0.23.11",
 ]
-
-[project.optional-dependencies]
 docs = [
     "mkdocs",
     "mkdocs-material",
@@ -64,6 +67,37 @@ docs = [
 test = [
     "pytest",
     "pytest-cov",
+]
+# Minimal dependencies for remote validation (no sglang, litellm, openai, docker, etc.)
+validate = [
+    "ghapi",
+    "python-dotenv",
+    "rich",
+    "swebench",
+    "unidiff",
+    "tqdm",
+]
+# Minimal dependencies for remote procedural bug generation (no sglang, litellm, openai, datasets, etc.)
+generate = [
+    "astor",
+    "docker",
+    "ghapi",
+    "libcst",
+    "python-dotenv",
+    "rich",
+    "swebench",
+    "tqdm",
+    "tree-sitter>=0.25",
+    "tree-sitter-c",
+    "tree-sitter-cpp",
+    "tree-sitter-c-sharp",
+    "tree-sitter-go",
+    "tree-sitter-javascript",
+    "tree-sitter-java",
+    "tree-sitter-ruby",
+    "tree-sitter-rust",
+    "tree-sitter-php>=0.23.11",
+    "unidiff",
 ]
 
 [tool.pytest.ini_options]

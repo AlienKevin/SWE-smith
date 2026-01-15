@@ -16,10 +16,13 @@ from collections import UserDict
 from dataclasses import dataclass, field
 from docker.models.containers import Container
 from dotenv import load_dotenv
+from functools import cached_property
 from ghapi.all import GhApi
 from multiprocessing import Lock
 from pathlib import Path
-from swesmith.bug_gen.adapters import get_entities_from_file, SUPPORTED_EXTS
+
+# Note: swesmith.bug_gen.adapters is imported lazily in extract_entities() to avoid
+# loading tree-sitter dependencies when only using Registry/get_valid_report
 from swebench.harness.constants import (
     DOCKER_USER,
     DOCKER_WORKDIR,
@@ -63,7 +66,7 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
     org_gh: str = ORG_NAME_GH
     arch: str = "x86_64" if platform.machine() not in {"aarch64", "arm64"} else "arm64"
     pltf: str = "linux/x86_64" if arch == "x86_64" else "linux/arm64/v8"
-    exts: list[str] = field(default_factory=lambda: SUPPORTED_EXTS)
+    exts: list[str] = field(default_factory=list)  # Must be set by subclass
     eval_sets: set[str] = field(default_factory=set)
 
     # Install + Test specifications
@@ -92,7 +95,6 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
     _cache_test_paths = None
     _cache_branches = None
     _cache_mirror_exists = None
-    _cache_image_exists = None
 
     ### START: Properties, Methods that *do not* require (re-)implementation ###
 
@@ -107,6 +109,21 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
     @property
     def image_name(self) -> str:
         return f"{self.org_dh}/swesmith.{self.arch}.{self.owner}_1776_{self.repo}.{self.commit[:8]}".lower()
+
+    @cached_property
+    def _cache_image_exists(self) -> bool:
+        """Check if Docker image exists locally."""
+        try:
+            subprocess.run(
+                f"docker image inspect {self.image_name}",
+                shell=True,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return True
+        except subprocess.CalledProcessError:
+            return False
 
     @property
     def mirror_name(self):
@@ -183,7 +200,6 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
             )
-        self._cache_image_exists = True
 
     def create_mirror(self):
         """Create a mirror of this repository at the specified commit."""
@@ -255,10 +271,18 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
             )
         dest = self.repo_name if not dest else dest
         if not os.path.exists(dest):
+            token = os.getenv("GITHUB_TOKEN")
+            if token:
+                base_url = (
+                    f"https://x-access-token:{token}@github.com/{self.mirror_name}.git"
+                )
+            else:
+                base_url = f"git@github.com:{self.mirror_name}.git"
+
             clone_cmd = (
-                f"git clone git@github.com:{self.mirror_name}.git"
+                f"git clone {base_url}"
                 if dest is None
-                else f"git clone git@github.com:{self.mirror_name}.git {dest}"
+                else f"git clone {base_url} {dest}"
             )
             subprocess.run(
                 clone_cmd,
@@ -286,6 +310,14 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
         Returns:
             List[CodeEntity]: List of CodeEntity objects containing entity information.
         """
+        # Lazy import to avoid loading tree-sitter dependencies when not needed
+        from swesmith.bug_gen.adapters import get_entities_from_file
+
+        if not self.exts:
+            raise ValueError(
+                f"RepoProfile subclass {self.__class__.__name__} must provide 'exts' list for entity extraction."
+            )
+
         dir_path, cloned = self.clone()
         entities = []
         for root, _, files in os.walk(dir_path):
@@ -314,11 +346,16 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
 
     def get_container(self, instance: dict) -> Container:
         """Return a docker container with the task instance initialized"""
+        import uuid
+
         client = docker.from_env()
         self.pull_image()
+        instance_id = instance[KEY_INSTANCE_ID]
+        # Use unique suffix to avoid container name conflicts in parallel execution
+        container_name = f"{instance_id}.{uuid.uuid4().hex[:8]}"
         container = client.containers.create(
             image=self.image_name,
-            name=instance[KEY_INSTANCE_ID],
+            name=container_name,
             user=DOCKER_USER,
             detach=True,
             command="tail -f /dev/null",
@@ -327,47 +364,32 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
         )
         container.start()
         val = container.exec_run(
-            f"git checkout {instance[KEY_INSTANCE_ID]}",
+            f"git checkout {instance_id}",
             workdir=DOCKER_WORKDIR,
             user=DOCKER_USER,
         )
         if val.exit_code != 0:
             raise RuntimeError(
-                f"Failed to checkout instance {instance[KEY_INSTANCE_ID]} in container: {val.output.decode()}"
+                f"Failed to checkout instance {instance_id} in container: {val.output.decode()}"
             )
         return container
 
     def pull_image(self):
         """Pull the Docker image for this repository profile."""
-        if self._cache_image_exists is True:
+        if self._cache_image_exists:
             return
-        try:
-            subprocess.run(
-                f"docker image inspect {self.image_name}",
-                shell=True,
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            # Image exists locally, no need to pull
-        except subprocess.CalledProcessError:
-            # Image doesn't exist locally, try to pull it
-            try:
-                subprocess.run(f"docker pull {self.image_name}", shell=True, check=True)
-            except subprocess.CalledProcessError as e:
-                raise RuntimeError(
-                    f"Failed to pull Docker image {self.image_name}: {e}"
-                )
 
-        self._cache_image_exists = True
+        # Image doesn't exist locally, try to pull it
+        try:
+            subprocess.run(f"docker pull {self.image_name}", shell=True, check=True)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"Failed to pull Docker image {self.image_name}: {e}")
 
     def push_image(self, rebuild_image: bool = False):
         if rebuild_image:
             subprocess.run(f"docker rmi {self.image_name}", shell=True)
             self.build_image()
-        assert self._cache_image_exists is True, (
-            "Image must be built or pulled before pushing"
-        )
+        assert self._cache_image_exists, "Image must be built or pulled before pushing"
         subprocess.run(f"docker push {self.image_name}", shell=True)
 
     def set_github_token(self, token: str):
