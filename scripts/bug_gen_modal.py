@@ -1704,7 +1704,7 @@ def gather_remote(
     validation_link = logs_link_dir / "run_validation"
 
     # Link task_insts: logs/task_insts -> /logs/task_insts (volume root)
-    task_insts_source = Path(LOGS_MOUNT_PATH) / "task_insts"
+    task_insts_source = Path(LOGS_MOUNT_PATH) / language / "task_insts"
     task_insts_link = logs_link_dir / "task_insts"
 
     try:
