@@ -181,6 +181,7 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
             with self._lock:  # Only one process enters this block at a time
                 # Use unique temp dir to avoid race conditions in multiprocessing
                 import uuid
+
                 temp_dest = f"{self.repo_name}_{uuid.uuid4().hex[:8]}"
                 dir_path, cloned = self.clone(dest=temp_dest)
                 self._cache_test_paths = [
@@ -292,9 +293,7 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
         if not os.path.exists(dest):
             token = os.getenv("GITHUB_TOKEN")
             if token:
-                base_url = (
-                    f"https://{token}@github.com/{self.mirror_name}.git"
-                )
+                base_url = f"https://{token}@github.com/{self.mirror_name}.git"
             else:
                 base_url = f"git@github.com:{self.mirror_name}.git"
 

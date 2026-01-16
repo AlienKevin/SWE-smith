@@ -1681,20 +1681,31 @@ def gather_remote(
     work_dir = Path("/root")
     logs_link_dir = work_dir / "logs"
     logs_link_dir.mkdir(exist_ok=True)
-    
+
     # Configure git authentication
     if "GITHUB_TOKEN" in os.environ:
         token = os.environ["GITHUB_TOKEN"]
         print(f"DEBUG: Found GITHUB_TOKEN (len={len(token)}). Configuring git auth...")
-        
+
         # Use simpler authenticated URL format for PATs
         subprocess.run(
-            ["git", "config", "--global", f"url.https://{token}@github.com/.insteadOf", "https://github.com/"],
-            check=True
+            [
+                "git",
+                "config",
+                "--global",
+                f"url.https://{token}@github.com/.insteadOf",
+                "https://github.com/",
+            ],
+            check=True,
         )
         # Also configure user info
-        subprocess.run(["git", "config", "--global", "user.email", "swesmith@swesmith.ai"], check=False)
-        subprocess.run(["git", "config", "--global", "user.name", "swesmith"], check=False)
+        subprocess.run(
+            ["git", "config", "--global", "user.email", "swesmith@swesmith.ai"],
+            check=False,
+        )
+        subprocess.run(
+            ["git", "config", "--global", "user.name", "swesmith"], check=False
+        )
     else:
         print("Warning: GITHUB_TOKEN not found in environment. Git push may fail.")
 
@@ -1711,66 +1722,71 @@ def gather_remote(
         # Ensure sources exist on volume
         task_insts_source.mkdir(parents=True, exist_ok=True)
         if not validation_source.exists():
-             return {"repo": repo_name, "status": "skipped", "reason": "No validation logs"}
+            return {
+                "repo": repo_name,
+                "status": "skipped",
+                "reason": "No validation logs",
+            }
 
         # Create symlinks
         if not validation_link.exists():
             os.symlink(str(validation_source), str(validation_link))
-        
+
         if not task_insts_link.exists():
             os.symlink(str(task_insts_source), str(task_insts_link))
 
         # Check if there are actually validation logs for this repo
         repo_vals = validation_link / repo_id
         if not repo_vals.exists():
-            return {"repo": repo_name, "status": "skipped", "reason": "No logs for repo"}
-        
+            return {
+                "repo": repo_name,
+                "status": "skipped",
+                "reason": "No logs for repo",
+            }
+
         # Build command
         # python -m swesmith.harness.gather logs/run_validation/<repo_id>
         cmd = [
             sys.executable,
-            "-m", "swesmith.harness.gather",
+            "-m",
+            "swesmith.harness.gather",
             str(Path("logs/run_validation") / repo_id),
             "-v",
             "-d",
         ]
-        
+
         if repush_image:
             cmd.append("--repush_image")
         if override_branch:
             cmd.append("--override_branch")
-            
+
         print(f"Running: {' '.join(cmd)}")
-            
+
         # execution
         result = subprocess.run(
-            cmd,
-            cwd=str(work_dir),
-            capture_output=True,
-            text=True,
-            env=os.environ
+            cmd, cwd=str(work_dir), capture_output=True, text=True, env=os.environ
         )
-        
+
         if result.returncode != 0:
             print("Gather failed:")
             print(result.stdout)
             print(result.stderr)
             return {
-                "repo": repo_name, 
-                "status": "failed", 
-                "stdout": result.stdout, 
-                "stderr": result.stderr
+                "repo": repo_name,
+                "status": "failed",
+                "stdout": result.stdout,
+                "stderr": result.stderr,
             }
         else:
             print("Gather succeeded:")
             print(result.stdout)
             print(result.stderr)
-        
+
         return {
             "repo": repo_name,
             "status": "success",
             "stdout": result.stdout,
-            "stderr": result.stderr
+            "stderr": result.stderr,
         }
 
     except Exception as e:
@@ -1783,29 +1799,29 @@ async def run_gather_phase_async(repos: list[str], language: str, args) -> None:
     print(f"\n{'#' * 60}")
     print(f"# PHASE 3: GATHER ({len(repos)} repos)")
     print(f"{'#' * 60}\n")
-    
-    # We can pass repush_image and override_branch via args if they existed, 
+
+    # We can pass repush_image and override_branch via args if they existed,
     # but for now we'll assume defaults or add them to args class if needed.
     repush = getattr(args, "repush_image", False)
     override = getattr(args, "override_branch", False)
-    
+
     completed = 0
     success = 0
-    
+
     print(f"Starting gather for {len(repos)} repos...")
-    
+
     async for result in gather_remote.map.aio(
         repos,
         kwargs={
             "language": language,
             "repush_image": repush,
             "override_branch": override,
-        }
+        },
     ):
         completed += 1
         repo = result.get("repo", "unknown")
         status = result.get("status", "unknown")
-        
+
         if status == "success":
             success += 1
             print(f"  [{completed}/{len(repos)}] {repo}: Success")
@@ -1815,11 +1831,13 @@ async def run_gather_phase_async(repos: list[str], language: str, args) -> None:
                 for line in lines[-5:]:
                     print(f"    | {line}")
         elif status == "skipped":
-            print(f"  [{completed}/{len(repos)}] {repo}: Skipped ({result.get('reason')})")
+            print(
+                f"  [{completed}/{len(repos)}] {repo}: Skipped ({result.get('reason')})"
+            )
         else:
             err = result.get("error") or "Non-zero exit code"
             print(f"  [{completed}/{len(repos)}] {repo}: Failed - {err}")
-            
+
     print(f"\nGather complete: {success}/{len(repos)} repos processed successfully.\n")
 
 
@@ -2236,4 +2254,3 @@ async def main(
         return
 
     await run_gather_phase_async(target_repos, language, args)
-
