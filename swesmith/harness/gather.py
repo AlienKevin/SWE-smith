@@ -368,6 +368,30 @@ def process_instance(
             "git config commit.gpgsign false",
             f"git checkout -b {subfolder}",
             "git add .",
+        ]
+        for cmd in cmds:
+            if debug_subprocess:
+                print(f"[{subfolder}] {cmd}")
+            subprocess.run(cmd, cwd=repo_path, **subprocess_args)
+
+        # Check for changes
+        status_output = subprocess.run(
+            "git status --porcelain",
+            cwd=repo_path,
+            capture_output=True,
+            shell=True,
+            check=True,
+        ).stdout.decode().strip()
+
+        if not status_output:
+            if verbose:
+                print(f"[{subfolder}] No changes to commit, skipping")
+            stats["skipped"] += 1
+            if cloned and os.path.exists(repo_path):
+                shutil.rmtree(repo_path)
+            return task_instances, created_repos, stats
+
+        cmds = [
             "git commit --no-gpg-sign -m 'Bug Patch'",
         ]
         for cmd in cmds:
