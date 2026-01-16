@@ -8,7 +8,7 @@ that can be run with SWE-agent. Each instances is of the form:
     "patch":
     "test_patch":
     "problem_statement":
-    "FAIL_TO_PASS":
+    "PASS_TO_FAIL":
     "PASS_TO_PASS":
     "version":
 }
@@ -34,7 +34,7 @@ import subprocess
 
 from pathlib import Path
 from swebench.harness.constants import (
-    FAIL_TO_PASS,
+    PASS_TO_FAIL,
     PASS_TO_PASS,
     KEY_INSTANCE_ID,
     LOG_REPORT,
@@ -187,16 +187,20 @@ def _main(
         if not os.path.exists(path_results):
             stats = skip_print(f"{subfolder}: No results", pbar, stats, verbose)
             continue
+            
+        if not os.path.exists(path_patch):
+            stats = skip_print(f"{subfolder}: No patch.diff", pbar, stats, verbose)
+            continue
 
         with open(path_results) as f:
             results = json.load(f)
-        if FAIL_TO_PASS not in results or PASS_TO_PASS not in results:
+        if PASS_TO_FAIL not in results or PASS_TO_PASS not in results:
             stats = skip_print(
                 f"{subfolder}: No validatable bugs", pbar, stats, verbose
             )
             continue
 
-        n_f2p = len(results[FAIL_TO_PASS])
+        n_f2p = len(results[PASS_TO_FAIL])
         n_p2p = len(results[PASS_TO_PASS])
         pr_exception = (
             ".pr_" in subfolder and n_p2p == 0 and n_f2p > 0
@@ -216,7 +220,7 @@ def _main(
         task_instance = {
             KEY_INSTANCE_ID: subfolder,
             KEY_PATCH: patch_content,
-            FAIL_TO_PASS: results[FAIL_TO_PASS],
+            PASS_TO_FAIL: results[PASS_TO_FAIL],
             PASS_TO_PASS: results[PASS_TO_PASS],
         }
         rp = registry.get_from_inst(task_instance)

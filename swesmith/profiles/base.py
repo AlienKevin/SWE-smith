@@ -290,7 +290,7 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
             token = os.getenv("GITHUB_TOKEN")
             if token:
                 base_url = (
-                    f"https://x-access-token:{token}@github.com/{self.mirror_name}.git"
+                    f"https://{token}@github.com/{self.mirror_name}.git"
                 )
             else:
                 base_url = f"git@github.com:{self.mirror_name}.git"

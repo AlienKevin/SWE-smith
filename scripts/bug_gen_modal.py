@@ -1018,7 +1018,7 @@ async def run_generation_phase(repos: list[str], args, language: str) -> list[di
         completed = 0
         total_bugs = 0
 
-        for result_or_exc in generate_bugs_remote.map(
+        async for result_or_exc in generate_bugs_remote.map.aio(
             repo_names,
             kwargs={
                 "max_bugs": args.max_bugs,
@@ -1475,6 +1475,11 @@ async def run_postgold_phase_async(
         report_volume_path = (
             f"{lang}/run_validation/{repo_id}/{instance_id}/report.json"
         )
+        # Write patch file to volume (required for gather step)
+        await volume_write_text(
+            f"{lang}/run_validation/{repo_id}/{instance_id}/patch.diff",
+            task["patch"],
+        )
 
         postgold_config = {
             "test_cmd": task["profile"].test_cmd,
@@ -1623,6 +1628,199 @@ def print_summary(results: list[dict], repos_count: int):
     print(
         f"\nTotal: {valid_count}/{len(results)} valid bugs across {repos_count} repos"
     )
+
+
+# ============================================================================
+# Gather Phase (Create Task Instances & Push Branches)
+# ============================================================================
+
+
+@app.function(
+    image=generator_image,
+    secrets=[modal.Secret.from_name("GITHUB_TOKEN")],
+    timeout=MODAL_TIMEOUT,
+    volumes={LOGS_MOUNT_PATH: logs_volume},
+)
+def gather_remote(
+    repo_name: str,
+    language: str,
+    repush_image: bool = False,
+    override_branch: bool = False,
+) -> dict:
+    """Run gather.py for a repository to create task instances and push branches."""
+    import os
+    import sys
+    import subprocess
+    import traceback
+    from pathlib import Path
+
+    # Ensure swesmith is in path
+    if "/root" not in sys.path:
+        sys.path.append("/root")
+
+    from swesmith.profiles import registry
+
+    # Resolve repo ID
+    def resolve_repo_id():
+        try:
+            return registry.get_from_inst(
+                {"repo": repo_name, "instance_id": "dummy"}
+            ).repo_name
+        except Exception:
+            target = repo_name.replace("/", "__")
+            candidates = [key for key in registry.keys() if target in key]
+            return candidates[0] if candidates else repo_name
+
+    repo_id = resolve_repo_id()
+    print(f"Gathering for {repo_name} (ID: {repo_id})")
+
+    # Setup environment to satisfy gather.py expectations
+    # 1. gather.py expects logs/run_validation to contain the repo logs
+    # 2. gather.py writes to logs/task_insts
+
+    work_dir = Path("/root")
+    logs_link_dir = work_dir / "logs"
+    logs_link_dir.mkdir(exist_ok=True)
+    
+    # Configure git authentication
+    if "GITHUB_TOKEN" in os.environ:
+        token = os.environ["GITHUB_TOKEN"]
+        print(f"DEBUG: Found GITHUB_TOKEN (len={len(token)}). Configuring git auth...")
+        
+        # Use simpler authenticated URL format for PATs
+        subprocess.run(
+            ["git", "config", "--global", f"url.https://{token}@github.com/.insteadOf", "https://github.com/"],
+            check=True
+        )
+        # Also configure user info
+        subprocess.run(["git", "config", "--global", "user.email", "swesmith@swesmith.ai"], check=False)
+        subprocess.run(["git", "config", "--global", "user.name", "swesmith"], check=False)
+    else:
+        print("Warning: GITHUB_TOKEN not found in environment. Git push may fail.")
+
+    # Link run_validation: logs/run_validation -> /logs/{language}/run_validation
+    # We use the mounted volume path directly as the target
+    validation_source = Path(LOGS_MOUNT_PATH) / language / "run_validation"
+    validation_link = logs_link_dir / "run_validation"
+
+    # Link task_insts: logs/task_insts -> /logs/task_insts (volume root)
+    task_insts_source = Path(LOGS_MOUNT_PATH) / "task_insts"
+    task_insts_link = logs_link_dir / "task_insts"
+
+    try:
+        # Ensure sources exist on volume
+        task_insts_source.mkdir(parents=True, exist_ok=True)
+        if not validation_source.exists():
+             return {"repo": repo_name, "status": "skipped", "reason": "No validation logs"}
+
+        # Create symlinks
+        if not validation_link.exists():
+            os.symlink(str(validation_source), str(validation_link))
+        
+        if not task_insts_link.exists():
+            os.symlink(str(task_insts_source), str(task_insts_link))
+
+        # Check if there are actually validation logs for this repo
+        repo_vals = validation_link / repo_id
+        if not repo_vals.exists():
+            return {"repo": repo_name, "status": "skipped", "reason": "No logs for repo"}
+        
+        # Build command
+        # python -m swesmith.harness.gather logs/run_validation/<repo_id>
+        cmd = [
+            sys.executable,
+            "-m", "swesmith.harness.gather",
+            str(Path("logs/run_validation") / repo_id),
+            "-v",
+            "-d",
+        ]
+        
+        if repush_image:
+            cmd.append("--repush_image")
+        if override_branch:
+            cmd.append("--override_branch")
+            
+        print(f"Running: {' '.join(cmd)}")
+            
+        # execution
+        result = subprocess.run(
+            cmd,
+            cwd=str(work_dir),
+            capture_output=True,
+            text=True,
+            env=os.environ
+        )
+        
+        if result.returncode != 0:
+            print("Gather failed:")
+            print(result.stdout)
+            print(result.stderr)
+            return {
+                "repo": repo_name, 
+                "status": "failed", 
+                "stdout": result.stdout, 
+                "stderr": result.stderr
+            }
+        else:
+            print("Gather succeeded:")
+            print(result.stdout)
+            print(result.stderr)
+        
+        return {
+            "repo": repo_name,
+            "status": "success",
+            "stdout": result.stdout,
+            "stderr": result.stderr
+        }
+
+    except Exception as e:
+        traceback.print_exc()
+        return {"repo": repo_name, "status": "error", "error": str(e)}
+
+
+async def run_gather_phase_async(repos: list[str], language: str, args) -> None:
+    """Run gather phase for all repos in parallel."""
+    print(f"\n{'#' * 60}")
+    print(f"# PHASE 3: GATHER ({len(repos)} repos)")
+    print(f"{'#' * 60}\n")
+    
+    # We can pass repush_image and override_branch via args if they existed, 
+    # but for now we'll assume defaults or add them to args class if needed.
+    repush = getattr(args, "repush_image", False)
+    override = getattr(args, "override_branch", False)
+    
+    completed = 0
+    success = 0
+    
+    print(f"Starting gather for {len(repos)} repos...")
+    
+    async for result in gather_remote.map.aio(
+        repos,
+        kwargs={
+            "language": language,
+            "repush_image": repush,
+            "override_branch": override,
+        }
+    ):
+        completed += 1
+        repo = result.get("repo", "unknown")
+        status = result.get("status", "unknown")
+        
+        if status == "success":
+            success += 1
+            print(f"  [{completed}/{len(repos)}] {repo}: Success")
+            # Print last few lines of stdout to see "Wrote X instances"
+            if "stdout" in result:
+                lines = result["stdout"].splitlines()
+                for line in lines[-5:]:
+                    print(f"    | {line}")
+        elif status == "skipped":
+            print(f"  [{completed}/{len(repos)}] {repo}: Skipped ({result.get('reason')})")
+        else:
+            err = result.get("error") or "Non-zero exit code"
+            print(f"  [{completed}/{len(repos)}] {repo}: Failed - {err}")
+            
+    print(f"\nGather complete: {success}/{len(repos)} repos processed successfully.\n")
 
 
 # ============================================================================
@@ -1941,6 +2139,7 @@ async def main(
     max_candidates: int = 2000,
     max_concurrent_tests: int = 900,
     show_stats: bool = False,
+    gather: bool = False,
 ):
     """
     Modal Bug Generation & Validation script.
@@ -1948,6 +2147,7 @@ async def main(
     Runs two phases:
     1. Generation: Creates bugs for repos (skips repos that are already done/failed)
     2. Validation: Validates all patches from the volume
+    3. Gather: Creates task instances and pushes branches
 
     Run with: modal run scripts/bug_gen.py [OPTIONS]
 
@@ -1960,6 +2160,7 @@ async def main(
         max_candidates: Max candidates to process, -1 for all (default: 2000)
         max_concurrent_tests: Max concurrent tests (default: 900)
         show_stats: If True, show bug breakdown stats and exit without running generation/validation
+        gather: If True, only run the gather phase (skip generation and validation)
     """
     # Handle --show-stats early exit
     if show_stats:
@@ -2001,27 +2202,38 @@ async def main(
     args.max_candidates = max_candidates
 
     # Phase 1: Generation (skips repos that are already done/failed)
-    generation_results = await run_generation_phase(target_repos, args, language)
+    if not gather:
+        generation_results = await run_generation_phase(target_repos, args, language)
 
-    # Phase 2: Validation - collect ALL patches from volume (not just from this run)
-    print(f"\n{'#' * 60}")
-    print("# PHASE 2: VALIDATION")
-    print(f"{'#' * 60}\n")
+        # Phase 2: Validation - collect ALL patches from volume (not just from this run)
+        print(f"\n{'#' * 60}")
+        print("# PHASE 2: VALIDATION")
+        print(f"{'#' * 60}\n")
 
-    print("Collecting patches from volume...")
-    all_patches = await collect_patches_from_files(target_repos, language)
-    print(f"Total: {len(all_patches)} patches\n")
+        print("Collecting patches from volume...")
+        all_patches = await collect_patches_from_files(target_repos, language)
+        print(f"Total: {len(all_patches)} patches\n")
 
-    results = await run_validation_phase_async(
-        all_patches, max_concurrent_tests, ENV_NAME
-    )
+        results = await run_validation_phase_async(
+            all_patches, max_concurrent_tests, ENV_NAME
+        )
 
-    if results:
-        print_summary(results, len(build_repos_with_patches(all_patches)))
+        if results:
+            print_summary(results, len(build_repos_with_patches(all_patches)))
 
-    # Report generation errors from this run
-    errors = [r for r in generation_results if "error" in r]
-    if errors:
-        print(f"\nGeneration Errors ({len(errors)}):")
-        for err in errors:
-            print(f"  - {err['repo']}: {err.get('error', 'Unknown')}")
+        # Report generation errors from this run
+        errors = [r for r in generation_results if "error" in r]
+        if errors:
+            print(f"\nGeneration Errors ({len(errors)}):")
+            for err in errors:
+                print(f"  - {err['repo']}: {err.get('error', 'Unknown')}")
+    else:
+        results = []
+
+    # Phase 3: Gather (Create task instances & Push branches)
+    if not results and not gather:
+        print("No validation results found. Skipping gather phase.")
+        return
+
+    await run_gather_phase_async(target_repos, language, args)
+
