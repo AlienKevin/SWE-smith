@@ -124,7 +124,7 @@ def setup_asyncio_exception_logging():
 APP_NAME = "swesmith-bug-gen"
 VOLUME_NAME = "swesmith-bug-gen"
 MINUTES = 60
-MODAL_TIMEOUT = 20 * MINUTES
+MODAL_TIMEOUT = 10 * MINUTES
 SANDBOX_RATE_LIMIT = 4  # Modal limits to 5/s, use 4 to be safe
 
 LANGUAGE_TO_BASE_CLASS = {
