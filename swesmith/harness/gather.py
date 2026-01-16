@@ -347,10 +347,12 @@ def _main(
                 print(f"[{repo}] Rebuilding + pushing image")
                 registry.get(repo).push_image(rebuild_image=True)
 
-    task_instances_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(task_instances_path, "w") as f:
-        json.dump(task_instances, f, indent=4)
-    print(f"Wrote {len(task_instances)} instances to {task_instances_path}")
+    if len(task_instances) > 0:
+        task_instances_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(task_instances_path, "w") as f:
+            json.dump(task_instances, f, indent=4)
+        print(f"Wrote {len(task_instances)} instances to {task_instances_path}")
+    
     print(f"- {stats['skipped']} skipped")
     print(f"- {stats['new_tasks']} new instances")
 
