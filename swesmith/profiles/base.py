@@ -179,10 +179,13 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
         """Clone the repo, get all testing file paths relative to the repo directory, then clean up."""
         if self._cache_test_paths is None:
             with self._lock:  # Only one process enters this block at a time
-                dir_path, cloned = self.clone()
+                # Use unique temp dir to avoid race conditions in multiprocessing
+                import uuid
+                temp_dest = f"{self.repo_name}_{uuid.uuid4().hex[:8]}"
+                dir_path, cloned = self.clone(dest=temp_dest)
                 self._cache_test_paths = [
-                    Path(os.path.relpath(os.path.join(root, file), self.repo_name))
-                    for root, _, files in os.walk(Path(self.repo_name).resolve())
+                    Path(os.path.relpath(os.path.join(root, file), dir_path))
+                    for root, _, files in os.walk(Path(dir_path).resolve())
                     for file in files
                     if self._is_test_path(root, file)
                 ]

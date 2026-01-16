@@ -31,6 +31,8 @@ import json
 import os
 import shutil
 import subprocess
+import concurrent.futures
+import functools
 
 from pathlib import Path
 from swebench.harness.constants import (
@@ -98,24 +100,25 @@ def check_if_branch_exists(
     main_branch: str,
     override_branch: bool,
     verbose: bool,
+    subprocess_args: dict,
 ):
     branch_exists = None
     try:
-        subprocess.run(f"git checkout {subfolder}", cwd=repo_name, **SUBPROCESS_ARGS)
+        subprocess.run(f"git checkout {subfolder}", cwd=repo_name, **subprocess_args)
         if override_branch:
             # Delete the branch remotely
             subprocess.run(
                 f"git push --delete origin {subfolder}",
                 cwd=repo_name,
-                **SUBPROCESS_ARGS,
+                **subprocess_args,
             )
             if verbose:
                 print(f"[{subfolder}] Overriding existing branch")
             branch_exists = False
         else:
             branch_exists = True
-        subprocess.run(f"git checkout {main_branch}", cwd=repo_name, **SUBPROCESS_ARGS)
-        subprocess.run(f"git branch -D {subfolder}", cwd=repo_name, **SUBPROCESS_ARGS)
+        subprocess.run(f"git checkout {main_branch}", cwd=repo_name, **subprocess_args)
+        subprocess.run(f"git branch -D {subfolder}", cwd=repo_name, **subprocess_args)
     except Exception:
         branch_exists = False
         pass
@@ -172,69 +175,139 @@ def _main(
         print(f"Found {len(task_instances)} existing task instances")
         subfolders = [x for x in subfolders if x not in completed_ids]
 
+    completed_ids = set(completed_ids)  # Optimize lookup
+    subfolders_to_process = [x for x in subfolders if x not in completed_ids]
+
+    print(f"Will process {len(subfolders_to_process)} instances")
+    
+    # Determine number of workers
+    n_workers = int(os.environ.get("MAX_WORKERS", os.cpu_count() or 1))
+    print(f"Using {n_workers} workers")
+
+    with concurrent.futures.ProcessPoolExecutor(max_workers=n_workers) as executor:
+        # Create a partial function with fixed arguments
+        func = functools.partial(
+            process_instance,
+            validation_logs_path=validation_logs_path,
+            override_branch=override_branch,
+            debug_subprocess=debug_subprocess,
+            verbose=verbose,
+        )
+
+        results = list(tqdm(
+            executor.map(func, sorted(subfolders_to_process)),
+            total=len(subfolders_to_process),
+            desc="Conversion"
+        ))
+
+    # Aggregate results
     stats = {"new_tasks": 0, "skipped": 0}
-    print(f"Will process {len(subfolders)} instances")
-    pbar = tqdm(subfolders, desc="Conversion", disable=verbose)
-    for subfolder in sorted(subfolders):
-        if subfolder.endswith(REF_SUFFIX) or subfolder in completed_ids:
-            # Skip reference run or instances that have been completed
-            stats = skip_print(f"{subfolder}: Reference", pbar, stats, verbose)
-            continue
+    for res_tasks, res_repos, res_stats in results:
+        task_instances.extend(res_tasks)
+        created_repos.update(res_repos)
+        for k, v in res_stats.items():
+            stats[k] += v
 
-        path_results = os.path.join(validation_logs_path, subfolder, LOG_REPORT)
-        path_patch = os.path.join(validation_logs_path, subfolder, "patch.diff")
+    if len(created_repos) > 0:
+        if repush_image:
+            print("Rebuilding + pushing images...")
+            for repo in created_repos:
+                 print(f"[{repo}] Rebuilding + pushing image")
+                 registry.get(repo).push_image(rebuild_image=True)
 
-        if not os.path.exists(path_results):
-            stats = skip_print(f"{subfolder}: No results", pbar, stats, verbose)
-            continue
-            
-        if not os.path.exists(path_patch):
-            stats = skip_print(f"{subfolder}: No patch.diff", pbar, stats, verbose)
-            continue
+    if len(task_instances) > 0:
+        task_instances_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(task_instances_path, "w") as f:
+            json.dump(task_instances, f, indent=4)
+        print(f"Wrote {len(task_instances)} instances to {task_instances_path}")
+    
+    print(f"- {stats['skipped']} skipped")
+    print(f"- {stats['new_tasks']} new instances")
 
-        with open(path_results) as f:
-            results = json.load(f)
-        if PASS_TO_FAIL not in results or PASS_TO_PASS not in results:
-            stats = skip_print(
-                f"{subfolder}: No validatable bugs", pbar, stats, verbose
-            )
-            continue
 
-        n_f2p = len(results[PASS_TO_FAIL])
-        n_p2p = len(results[PASS_TO_PASS])
-        pr_exception = (
-            ".pr_" in subfolder and n_p2p == 0 and n_f2p > 0
-        )  # TODO: Better way to determine if it's a PR miror?
-        if not pr_exception and (KEY_TIMED_OUT in results or n_f2p == 0 or n_p2p == 0):
-            # Skip instances that timed out OR don't have F2P or P2P
-            stats = skip_print(
-                f"{subfolder}: No validatable bugs: {n_f2p=}, {n_p2p=}",
-                pbar,
-                stats,
-                verbose,
-            )
-            continue
+def process_instance(
+    subfolder: str,
+    validation_logs_path: Path,
+    override_branch: bool,
+    debug_subprocess: bool,
+    verbose: bool,
+) -> tuple[list[dict], set[str], dict]:
+    """
+    Process a single task instance.
+    Returns:
+        task_instances: list of created task instances
+        created_repos: set of repository names that were cloned
+        stats: dictionary of statistics
+    """
+    stats = {"new_tasks": 0, "skipped": 0}
+    task_instances = []
+    created_repos = set()
+    
+    # Use a unique temporary directory for this process/task to avoid collision
+    # We append process ID or random string to repo path
+    import multiprocessing
+    pid = multiprocessing.current_process().pid
+    
+    # Define subprocess args locally to avoid global state issues with multiprocessing
+    subprocess_args = SUBPROCESS_ARGS.copy()
+    if not debug_subprocess:
+        subprocess_args["stdout"] = subprocess.DEVNULL
+        subprocess_args["stderr"] = subprocess.DEVNULL
 
-        with open(path_patch) as f:
-            patch_content = f.read()
-        task_instance = {
-            KEY_INSTANCE_ID: subfolder,
-            KEY_PATCH: patch_content,
-            PASS_TO_FAIL: results[PASS_TO_FAIL],
-            PASS_TO_PASS: results[PASS_TO_PASS],
-        }
-        rp = registry.get_from_inst(task_instance)
-        task_instance[KEY_IMAGE_NAME] = rp.image_name
-        task_instance["repo"] = rp.mirror_name
+    if subfolder.endswith(REF_SUFFIX):
+        return [], set(), {"new_tasks": 0, "skipped": 1}
 
-        # Clone repository
-        _, cloned = rp.clone()
+    path_results = os.path.join(validation_logs_path, subfolder, LOG_REPORT)
+    path_patch = os.path.join(validation_logs_path, subfolder, "patch.diff")
+
+    if not os.path.exists(path_results):
+        if verbose: print(f"[SKIP] {subfolder}: No results")
+        return [], set(), {"new_tasks": 0, "skipped": 1}
+        
+    if not os.path.exists(path_patch):
+        if verbose: print(f"[SKIP] {subfolder}: No patch.diff")
+        return [], set(), {"new_tasks": 0, "skipped": 1}
+
+    with open(path_results) as f:
+        results = json.load(f)
+    if PASS_TO_FAIL not in results or PASS_TO_PASS not in results:
+        if verbose: print(f"[SKIP] {subfolder}: No validatable bugs")
+        return [], set(), {"new_tasks": 0, "skipped": 1}
+
+    n_f2p = len(results[PASS_TO_FAIL])
+    n_p2p = len(results[PASS_TO_PASS])
+    pr_exception = (
+        ".pr_" in subfolder and n_p2p == 0 and n_f2p > 0
+    )
+    if not pr_exception and (KEY_TIMED_OUT in results or n_f2p == 0 or n_p2p == 0):
+        if verbose: print(f"[SKIP] {subfolder}: No validatable bugs: {n_f2p=}, {n_p2p=}")
+        return [], set(), {"new_tasks": 0, "skipped": 1}
+
+    with open(path_patch) as f:
+        patch_content = f.read()
+    task_instance = {
+        KEY_INSTANCE_ID: subfolder,
+        KEY_PATCH: patch_content,
+        PASS_TO_FAIL: results[PASS_TO_FAIL],
+        PASS_TO_PASS: results[PASS_TO_PASS],
+    }
+    rp = registry.get_from_inst(task_instance)
+    task_instance[KEY_IMAGE_NAME] = rp.image_name
+    task_instance["repo"] = rp.mirror_name
+
+    # Unique clone path for this worker
+    repo_path = f"{rp.repo_name}_{pid}_{subfolder}"
+    
+    # Clone repository
+    try:
+        _, cloned = rp.clone(dest=repo_path)
         if cloned:
             created_repos.add(rp.repo_name)
+
         main_branch = (
             subprocess.run(
                 "git rev-parse --abbrev-ref HEAD",
-                cwd=rp.repo_name,
+                cwd=repo_path,
                 capture_output=True,
                 shell=True,
                 check=True,
@@ -244,18 +317,20 @@ def _main(
         )
 
         # Check if branch already created for this problem
+        # We pass the repo_path as cwd for the git operations inside the helper
+        
         branch_exists = check_if_branch_exists(
-            rp.repo_name, subfolder, main_branch, override_branch, verbose
+            repo_path, subfolder, main_branch, override_branch, verbose, subprocess_args
         )
         if branch_exists:
             task_instances.append(task_instance)
-            stats = skip_print(
-                f"{subfolder}: Branch `{subfolder}` exists",
-                pbar,
-                stats,
-                verbose,
-            )
-            continue
+            if verbose: print(f"[SKIP] {subfolder}: Branch `{subfolder}` exists")
+            stats["skipped"] += 1
+            # Cleanup
+            if cloned and os.path.exists(repo_path):
+                shutil.rmtree(repo_path)
+            return task_instances, created_repos, stats
+            
         elif verbose:
             print(f"[{subfolder}] Does not exist yet")
 
@@ -264,7 +339,7 @@ def _main(
         for git_apply in GIT_APPLY_CMDS:
             output = subprocess.run(
                 f"{git_apply} ../{path_patch}",
-                cwd=rp.repo_name,
+                cwd=repo_path,
                 capture_output=True,
                 shell=True,
             )
@@ -272,14 +347,21 @@ def _main(
                 applied = True
                 break
             else:
-                # Remove any artifacts
-                subprocess.run("git reset --hard", cwd=rp.repo_name, **SUBPROCESS_ARGS)
+                subprocess.run("git reset --hard", cwd=repo_path, **subprocess_args)
+        
         if not applied:
-            raise Exception(f"[{subfolder}] Failed to apply patch to {rp.repo_name}")
+            # We can't raise Exception here as it stops the worker? 
+            # Or we let it bubble up and fail the future?
+            # Better to catch and print/skip
+            print(f"[{subfolder}] Failed to apply patch to {rp.repo_name}")
+            if cloned and os.path.exists(repo_path):
+                shutil.rmtree(repo_path)
+            return [], set(), stats # Don't record this one
+            
         if verbose:
             print(f"[{subfolder}] Bug patch applied successfully")
 
-        # Create a branch, check it out, commit, push the branch, and cleanup
+        # Create branch etc
         cmds = [
             "git config user.email 'swesmith@swesmith.ai'",
             "git config user.name 'swesmith'",
@@ -291,20 +373,18 @@ def _main(
         for cmd in cmds:
             if debug_subprocess:
                 print(f"[{subfolder}] {cmd}")
-            subprocess.run(cmd, cwd=rp.repo_name, **SUBPROCESS_ARGS)
+            subprocess.run(cmd, cwd=repo_path, **subprocess_args)
 
-        # Create test patch by removing F2P test files
+        # F2P patch
         f2p_test_files, _ = rp.get_test_files(task_instance)
         if f2p_test_files:
-            # Remove the test files
             for test_file in f2p_test_files:
-                test_file_path = os.path.join(rp.repo_name, test_file)
+                test_file_path = os.path.join(repo_path, test_file)
                 if os.path.exists(test_file_path):
                     os.remove(test_file_path)
                     if verbose:
                         print(f"[{subfolder}] Removed F2P test file: {test_file}")
 
-            # Add and commit removal
             cmds = [
                 "git add .",
                 "git commit --no-gpg-sign -m 'Remove F2P Tests'",
@@ -312,12 +392,10 @@ def _main(
             for cmd in cmds:
                 if debug_subprocess:
                     print(f"[{subfolder}] {cmd}")
-                subprocess.run(cmd, cwd=rp.repo_name, **SUBPROCESS_ARGS)
+                subprocess.run(cmd, cwd=repo_path, **subprocess_args)
             if verbose:
                 print(f"[{subfolder}] Commit F2P test file(s) removal")
-        elif verbose:
-            print(f"[{subfolder}] No test files to remove")
-
+        
         cmds = [
             f"git push origin {subfolder}",
             f"git checkout {main_branch}",
@@ -327,7 +405,8 @@ def _main(
         for cmd in cmds:
             if debug_subprocess:
                 print(f"[{subfolder}] {cmd}")
-            subprocess.run(cmd, cwd=rp.repo_name, **SUBPROCESS_ARGS)
+            subprocess.run(cmd, cwd=repo_path, **subprocess_args)
+        
         if verbose:
             print(f"[{subfolder}] Bug @ branch `{subfolder}`")
 
@@ -335,27 +414,13 @@ def _main(
         if verbose:
             print(f"[{subfolder}] Created task instance")
         stats["new_tasks"] += 1
-        pbar.update()
-
-    pbar.close()
-    if len(created_repos) > 0:
-        print("Cleaning up...")
-        for repo in created_repos:
-            shutil.rmtree(repo)
-            print(f"[{repo}] Removed local clone")
-            if repush_image:
-                print(f"[{repo}] Rebuilding + pushing image")
-                registry.get(repo).push_image(rebuild_image=True)
-
-    if len(task_instances) > 0:
-        task_instances_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(task_instances_path, "w") as f:
-            json.dump(task_instances, f, indent=4)
-        print(f"Wrote {len(task_instances)} instances to {task_instances_path}")
-    
-    print(f"- {stats['skipped']} skipped")
-    print(f"- {stats['new_tasks']} new instances")
-
+        
+    finally:
+        # Cleanup unique clone
+        if os.path.exists(repo_path):
+            shutil.rmtree(repo_path)
+            
+    return task_instances, created_repos, stats
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
