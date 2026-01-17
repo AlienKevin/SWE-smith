@@ -38,6 +38,7 @@ from pathlib import Path
 from swebench.harness.constants import (
     PASS_TO_FAIL,
     PASS_TO_PASS,
+    FAIL_TO_PASS,
     KEY_INSTANCE_ID,
     LOG_REPORT,
 )
@@ -341,7 +342,7 @@ def process_instance(
     task_instance = {
         KEY_INSTANCE_ID: subfolder,
         KEY_PATCH: patch_content,
-        PASS_TO_FAIL: results[PASS_TO_FAIL],
+        FAIL_TO_PASS: results[PASS_TO_FAIL], # Flip PASS_TO_FAIL to FAIL_TO_PASS following SWE-bench naming convention
         PASS_TO_PASS: results[PASS_TO_PASS],
     }
     rp = registry.get_from_inst(task_instance)
