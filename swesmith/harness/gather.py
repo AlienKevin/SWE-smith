@@ -348,56 +348,103 @@ def process_instance(
     task_instance[KEY_IMAGE_NAME] = rp.image_name
     task_instance["repo"] = rp.mirror_name
 
-    # Unique clone path for this worker
-    repo_path = f"{rp.repo_name}_{pid}_{subfolder}"
+    # Persistent worker path - reused across tasks for this process
+    # We place it in the same temporary directory as the cache to ensure automatic cleanup.
+    if cache_dir:
+        # cache_dir is .../temp/repo, so dirname is .../temp
+        repo_path = os.path.join(os.path.dirname(cache_dir), f"{rp.repo_name}_worker_{pid}")
+    else:
+        # Fallback if no cache used (e.g. debugging), though likely not cleaned up automatically
+        repo_path = os.path.abspath(f"{rp.repo_name}_worker_{pid}")
 
-    # Clone repository
+    # Helper to reset repo state
+    def reset_repo(path):
+        subprocess.run(
+            "git reset --hard", cwd=path, **subprocess_args
+        )
+        subprocess.run(
+            "git clean -fdx", cwd=path, **subprocess_args
+        )
+        # remove potential lock files if previous run crashed hard
+        lock_file = os.path.join(path, ".git", "index.lock")
+        if os.path.exists(lock_file):
+            try:
+                os.remove(lock_file)
+            except OSError:
+                pass
+
+    cloned = False
     try:
-        if cache_dir and os.path.exists(cache_dir):
+        if os.path.exists(repo_path):
+            # Reuse existing repo for this worker
             if verbose:
-                print(f"[{subfolder}] Cloning from cache {cache_dir}...")
+                print(f"[{subfolder}] Reusing worker repo {repo_path}")
+            reset_repo(repo_path)
             
-            subprocess.run(
-                f"git clone {cache_dir} {repo_path}",
-                check=True,
-                shell=True,
-                stdout=subprocess.DEVNULL if not debug_subprocess else None,
-                stderr=subprocess.DEVNULL if not debug_subprocess else None,
+            # We need to know main branch name. We can get it from local repo now.
+            # Assuming main branch hasn't changed name/ref significantly.
+            # We avoid 'git pull' to save rate limits and time. 
+            main_branch = (
+                subprocess.run(
+                    "git rev-parse --abbrev-ref HEAD",
+                    cwd=repo_path,
+                    capture_output=True,
+                    shell=True,
+                    check=True,
+                )
+                .stdout.decode()
+                .strip()
             )
-            cloned = True
-            created_repos.add(rp.repo_name)
+            # Ensure we are on main branch
+            subprocess.run(f"git checkout {main_branch}", cwd=repo_path, **subprocess_args)
 
-            # Fix origin remote to point to actual GitHub repo so push works
-            remote_url = f"https://github.com/{rp.mirror_name}.git"
-            
-            subprocess.run(
-                f"git remote set-url origin {remote_url}",
-                cwd=repo_path,
-                check=True,
-                shell=True,
-                stdout=subprocess.DEVNULL if not debug_subprocess else None,
-                stderr=subprocess.DEVNULL if not debug_subprocess else None,
-            )
         else:
-            _, cloned = rp.clone(dest=repo_path)
-            if cloned:
+            # First time setup for this worker
+            if cache_dir and os.path.exists(cache_dir):
+                if verbose:
+                    print(f"[{subfolder}] First-time clone from cache {cache_dir}...")
+                
+                subprocess.run(
+                    f"git clone {cache_dir} {repo_path}",
+                    check=True,
+                    shell=True,
+                    stdout=subprocess.DEVNULL if not debug_subprocess else None,
+                    stderr=subprocess.DEVNULL if not debug_subprocess else None,
+                )
+                cloned = True
                 created_repos.add(rp.repo_name)
 
-        main_branch = (
-            subprocess.run(
-                "git rev-parse --abbrev-ref HEAD",
-                cwd=repo_path,
-                capture_output=True,
-                shell=True,
-                check=True,
+                # Fix origin remote
+                remote_url = f"https://github.com/{rp.mirror_name}.git"
+                subprocess.run(
+                    f"git remote set-url origin {remote_url}",
+                    cwd=repo_path,
+                    check=True,
+                    shell=True,
+                    stdout=subprocess.DEVNULL if not debug_subprocess else None,
+                    stderr=subprocess.DEVNULL if not debug_subprocess else None,
+                )
+            else:
+                _, cloned = rp.clone(dest=repo_path)
+                created_repos.add(rp.repo_name)
+
+            main_branch = (
+                subprocess.run(
+                    "git rev-parse --abbrev-ref HEAD",
+                    cwd=repo_path,
+                    capture_output=True,
+                    shell=True,
+                    check=True,
+                )
+                .stdout.decode()
+                .strip()
             )
-            .stdout.decode()
-            .strip()
-        )
+
+        # Ensure we are clean on main branch before starting
+        subprocess.run(f"git checkout {main_branch}", cwd=repo_path, **subprocess_args)
+
 
         # Check if branch already created for this problem
-        # We pass the repo_path as cwd for the git operations inside the helper
-
         branch_exists = check_if_branch_exists(
             repo_path, subfolder, main_branch, override_branch, verbose, subprocess_args
         )
@@ -406,9 +453,8 @@ def process_instance(
             if verbose:
                 print(f"[SKIP] {subfolder}: Branch `{subfolder}` exists")
             stats["skipped"] += 1
-            # Cleanup
-            if cloned and os.path.exists(repo_path):
-                shutil.rmtree(repo_path)
+            # Do NOT remove repo, just return. 
+            # We might want to checkout main to be polite to next run but reset_repo handles it.
             return task_instances, created_repos, stats
 
         elif verbose:
@@ -430,12 +476,9 @@ def process_instance(
                 subprocess.run("git reset --hard", cwd=repo_path, **subprocess_args)
 
         if not applied:
-            # We can't raise Exception here as it stops the worker?
-            # Or we let it bubble up and fail the future?
-            # Better to catch and print/skip
             print(f"[{subfolder}] Failed to apply patch to {rp.repo_name}")
-            if cloned and os.path.exists(repo_path):
-                shutil.rmtree(repo_path)
+            # Reset for next usage
+            reset_repo(repo_path)
             return [], set(), stats  # Don't record this one
 
         if verbose:
@@ -471,8 +514,10 @@ def process_instance(
             if verbose:
                 print(f"[{subfolder}] No changes to commit, skipping")
             stats["skipped"] += 1
-            if cloned and os.path.exists(repo_path):
-                shutil.rmtree(repo_path)
+            # Reset logic happens at start of next or via finally... 
+            # actually better to cleanup branch now
+            subprocess.run(f"git checkout {main_branch}", cwd=repo_path, **subprocess_args)
+            subprocess.run(f"git branch -D {subfolder}", cwd=repo_path, **subprocess_args)
             return task_instances, created_repos, stats
 
         cmds = [
@@ -524,10 +569,9 @@ def process_instance(
         stats["new_tasks"] += 1
 
     finally:
-        # Cleanup unique clone
-        if os.path.exists(repo_path):
-            shutil.rmtree(repo_path)
-
+        # DO NOT remove repo_path. We persist it for this worker logic.
+        pass
+    
     return task_instances, created_repos, stats
 
 
