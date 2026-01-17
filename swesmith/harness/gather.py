@@ -29,7 +29,6 @@ Usage: python -m swesmith.harness.gather logs/run_validation/<run_id>
 import argparse
 import json
 import os
-import shutil
 import subprocess
 import concurrent.futures
 import functools
