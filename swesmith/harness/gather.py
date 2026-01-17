@@ -102,23 +102,33 @@ def check_if_branch_exists(
     verbose: bool,
     subprocess_args: dict,
 ):
-    branch_exists = None
+    branch_exists = False
     try:
-        subprocess.run(f"git checkout {subfolder}", cwd=repo_name, **subprocess_args)
-        if override_branch:
-            # Delete the branch remotely
-            subprocess.run(
-                f"git push --delete origin {subfolder}",
-                cwd=repo_name,
-                **subprocess_args,
-            )
-            if verbose:
-                print(f"[{subfolder}] Overriding existing branch")
-            branch_exists = False
-        else:
+        # Check remote for branch existence directly
+        # This is more robust than checkout/fetch for cached repos
+        result = subprocess.run(
+            f"git ls-remote --heads origin {subfolder}",
+            cwd=repo_name,
+            capture_output=True,
+            shell=True,
+            text=True
+        )
+        
+        # If there is output, the branch exists on remote
+        if result.returncode == 0 and subfolder in result.stdout:
             branch_exists = True
-        subprocess.run(f"git checkout {main_branch}", cwd=repo_name, **subprocess_args)
-        subprocess.run(f"git branch -D {subfolder}", cwd=repo_name, **subprocess_args)
+            if override_branch:
+                # Delete the branch remotely
+                subprocess.run(
+                    f"git push --delete origin {subfolder}",
+                    cwd=repo_name,
+                    **subprocess_args,
+                )
+                if verbose:
+                    print(f"[{subfolder}] Overriding existing branch")
+                branch_exists = False
+        
+        
     except Exception:
         branch_exists = False
         pass
