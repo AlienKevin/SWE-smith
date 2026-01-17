@@ -111,9 +111,9 @@ def check_if_branch_exists(
             cwd=repo_name,
             capture_output=True,
             shell=True,
-            text=True
+            text=True,
         )
-        
+
         # If there is output, the branch exists on remote
         if result.returncode == 0 and subfolder in result.stdout:
             branch_exists = True
@@ -127,8 +127,7 @@ def check_if_branch_exists(
                 if verbose:
                     print(f"[{subfolder}] Overriding existing branch")
                 branch_exists = False
-        
-        
+
     except Exception:
         branch_exists = False
         pass
@@ -202,7 +201,7 @@ def _main(
         # We must clone into a subdirectory which doesn't exist yet.
         cache_dir = os.path.join(cache_root, "repo")
         print(f"Pre-cloning repository to cache: {cache_dir}...")
-        
+
         rp_cache = None
         # Try resolving profile from run_id (directory name) first
         try:
@@ -217,7 +216,7 @@ def _main(
                     rp_cache = registry.get_from_inst({KEY_INSTANCE_ID: sample_id})
                 except Exception as e:
                     print(f"Warning: Could not resolve profile from {sample_id}: {e}")
-        
+
         path_to_cache = None
         if rp_cache:
             try:
@@ -228,7 +227,9 @@ def _main(
             except Exception as e:
                 print(f"Pre-clone failed: {e}. Will fall back to per-instance cloning.")
         else:
-            print("Could not resolve profile for pre-cloning. Will iterate per instance.")
+            print(
+                "Could not resolve profile for pre-cloning. Will iterate per instance."
+            )
 
         with concurrent.futures.ProcessPoolExecutor(max_workers=n_workers) as executor:
             # Create a partial function with fixed arguments
@@ -341,7 +342,9 @@ def process_instance(
     task_instance = {
         KEY_INSTANCE_ID: subfolder,
         KEY_PATCH: patch_content,
-        FAIL_TO_PASS: results[PASS_TO_FAIL], # Flip PASS_TO_FAIL to FAIL_TO_PASS following SWE-bench naming convention
+        FAIL_TO_PASS: results[
+            PASS_TO_FAIL
+        ],  # Flip PASS_TO_FAIL to FAIL_TO_PASS following SWE-bench naming convention
         PASS_TO_PASS: results[PASS_TO_PASS],
     }
     rp = registry.get_from_inst(task_instance)
@@ -352,19 +355,17 @@ def process_instance(
     # We place it in the same temporary directory as the cache to ensure automatic cleanup.
     if cache_dir:
         # cache_dir is .../temp/repo, so dirname is .../temp
-        repo_path = os.path.join(os.path.dirname(cache_dir), f"{rp.repo_name}_worker_{pid}")
+        repo_path = os.path.join(
+            os.path.dirname(cache_dir), f"{rp.repo_name}_worker_{pid}"
+        )
     else:
         # Fallback if no cache used (e.g. debugging), though likely not cleaned up automatically
         repo_path = os.path.abspath(f"{rp.repo_name}_worker_{pid}")
 
     # Helper to reset repo state
     def reset_repo(path):
-        subprocess.run(
-            "git reset --hard", cwd=path, **subprocess_args
-        )
-        subprocess.run(
-            "git clean -fdx", cwd=path, **subprocess_args
-        )
+        subprocess.run("git reset --hard", cwd=path, **subprocess_args)
+        subprocess.run("git clean -fdx", cwd=path, **subprocess_args)
         # remove potential lock files if previous run crashed hard
         lock_file = os.path.join(path, ".git", "index.lock")
         if os.path.exists(lock_file):
@@ -380,10 +381,10 @@ def process_instance(
             if verbose:
                 print(f"[{subfolder}] Reusing worker repo {repo_path}")
             reset_repo(repo_path)
-            
+
             # We need to know main branch name. We can get it from local repo now.
             # Assuming main branch hasn't changed name/ref significantly.
-            # We avoid 'git pull' to save rate limits and time. 
+            # We avoid 'git pull' to save rate limits and time.
             main_branch = (
                 subprocess.run(
                     "git rev-parse --abbrev-ref HEAD",
@@ -396,14 +397,16 @@ def process_instance(
                 .strip()
             )
             # Ensure we are on main branch
-            subprocess.run(f"git checkout {main_branch}", cwd=repo_path, **subprocess_args)
+            subprocess.run(
+                f"git checkout {main_branch}", cwd=repo_path, **subprocess_args
+            )
 
         else:
             # First time setup for this worker
             if cache_dir and os.path.exists(cache_dir):
                 if verbose:
                     print(f"[{subfolder}] First-time clone from cache {cache_dir}...")
-                
+
                 subprocess.run(
                     f"git clone {cache_dir} {repo_path}",
                     check=True,
@@ -443,7 +446,6 @@ def process_instance(
         # Ensure we are clean on main branch before starting
         subprocess.run(f"git checkout {main_branch}", cwd=repo_path, **subprocess_args)
 
-
         # Check if branch already created for this problem
         branch_exists = check_if_branch_exists(
             repo_path, subfolder, main_branch, override_branch, verbose, subprocess_args
@@ -453,7 +455,7 @@ def process_instance(
             if verbose:
                 print(f"[SKIP] {subfolder}: Branch `{subfolder}` exists")
             stats["skipped"] += 1
-            # Do NOT remove repo, just return. 
+            # Do NOT remove repo, just return.
             # We might want to checkout main to be polite to next run but reset_repo handles it.
             return task_instances, created_repos, stats
 
@@ -514,10 +516,14 @@ def process_instance(
             if verbose:
                 print(f"[{subfolder}] No changes to commit, skipping")
             stats["skipped"] += 1
-            # Reset logic happens at start of next or via finally... 
+            # Reset logic happens at start of next or via finally...
             # actually better to cleanup branch now
-            subprocess.run(f"git checkout {main_branch}", cwd=repo_path, **subprocess_args)
-            subprocess.run(f"git branch -D {subfolder}", cwd=repo_path, **subprocess_args)
+            subprocess.run(
+                f"git checkout {main_branch}", cwd=repo_path, **subprocess_args
+            )
+            subprocess.run(
+                f"git branch -D {subfolder}", cwd=repo_path, **subprocess_args
+            )
             return task_instances, created_repos, stats
 
         cmds = [
@@ -571,7 +577,7 @@ def process_instance(
     finally:
         # DO NOT remove repo_path. We persist it for this worker logic.
         pass
-    
+
     return task_instances, created_repos, stats
 
 
