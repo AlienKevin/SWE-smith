@@ -194,23 +194,60 @@ def _main(
     n_workers = int(os.environ.get("MAX_WORKERS", os.cpu_count() or 1))
     print(f"Using {n_workers} workers")
 
-    with concurrent.futures.ProcessPoolExecutor(max_workers=n_workers) as executor:
-        # Create a partial function with fixed arguments
-        func = functools.partial(
-            process_instance,
-            validation_logs_path=validation_logs_path,
-            override_branch=override_branch,
-            debug_subprocess=debug_subprocess,
-            verbose=verbose,
-        )
+    # Optimization: Cache repo locally to avoid rate limits and speed up cloning
+    import tempfile
 
-        results = list(
-            tqdm(
-                executor.map(func, sorted(subfolders_to_process)),
-                total=len(subfolders_to_process),
-                desc="Conversion",
+    with tempfile.TemporaryDirectory() as cache_root:
+        # cache_root exists, so rp.clone(dest=cache_root) would skip cloning.
+        # We must clone into a subdirectory which doesn't exist yet.
+        cache_dir = os.path.join(cache_root, "repo")
+        print(f"Pre-cloning repository to cache: {cache_dir}...")
+        
+        rp_cache = None
+        # Try resolving profile from run_id (directory name) first
+        try:
+            rp_cache = registry.get(run_id)
+        except Exception:
+            pass
+
+        if not rp_cache:
+            sample_id = next((s for s in subfolders if "." in s), None)
+            if sample_id:
+                try:
+                    rp_cache = registry.get_from_inst({KEY_INSTANCE_ID: sample_id})
+                except Exception as e:
+                    print(f"Warning: Could not resolve profile from {sample_id}: {e}")
+        
+        path_to_cache = None
+        if rp_cache:
+            try:
+                print(f"Cloning {rp_cache.repo_name} to cache...")
+                rp_cache.clone(dest=cache_dir)
+                path_to_cache = cache_dir
+                print("Pre-clone successful.")
+            except Exception as e:
+                print(f"Pre-clone failed: {e}. Will fall back to per-instance cloning.")
+        else:
+            print("Could not resolve profile for pre-cloning. Will iterate per instance.")
+
+        with concurrent.futures.ProcessPoolExecutor(max_workers=n_workers) as executor:
+            # Create a partial function with fixed arguments
+            func = functools.partial(
+                process_instance,
+                validation_logs_path=validation_logs_path,
+                override_branch=override_branch,
+                debug_subprocess=debug_subprocess,
+                verbose=verbose,
+                cache_dir=path_to_cache,
             )
-        )
+
+            results = list(
+                tqdm(
+                    executor.map(func, sorted(subfolders_to_process)),
+                    total=len(subfolders_to_process),
+                    desc="Conversion",
+                )
+            )
 
     # Aggregate results
     stats = {"new_tasks": 0, "skipped": 0}
@@ -243,6 +280,7 @@ def process_instance(
     override_branch: bool,
     debug_subprocess: bool,
     verbose: bool,
+    cache_dir: str | None = None,
 ) -> tuple[list[dict], set[str], dict]:
     """
     Process a single task instance.
@@ -315,9 +353,35 @@ def process_instance(
 
     # Clone repository
     try:
-        _, cloned = rp.clone(dest=repo_path)
-        if cloned:
+        if cache_dir and os.path.exists(cache_dir):
+            if verbose:
+                print(f"[{subfolder}] Cloning from cache {cache_dir}...")
+            
+            subprocess.run(
+                f"git clone {cache_dir} {repo_path}",
+                check=True,
+                shell=True,
+                stdout=subprocess.DEVNULL if not debug_subprocess else None,
+                stderr=subprocess.DEVNULL if not debug_subprocess else None,
+            )
+            cloned = True
             created_repos.add(rp.repo_name)
+
+            # Fix origin remote to point to actual GitHub repo so push works
+            remote_url = f"https://github.com/{rp.mirror_name}.git"
+            
+            subprocess.run(
+                f"git remote set-url origin {remote_url}",
+                cwd=repo_path,
+                check=True,
+                shell=True,
+                stdout=subprocess.DEVNULL if not debug_subprocess else None,
+                stderr=subprocess.DEVNULL if not debug_subprocess else None,
+            )
+        else:
+            _, cloned = rp.clone(dest=repo_path)
+            if cloned:
+                created_repos.add(rp.repo_name)
 
         main_branch = (
             subprocess.run(
