@@ -2451,12 +2451,12 @@ async def main(
     else:
         results = []
 
-    # # Phase 3: Gather (Create task instances & Push branches)
-    # if not results and not gather:
-    #     print("No validation results found. Skipping gather phase.")
-    #     return
+    # Phase 3: Gather (Create task instances & Push branches)
+    if not results and not gather:
+        print("No validation results found. Skipping gather phase.")
+        return
 
-    # await run_gather_phase_async(target_repos, language, args)
+    await run_gather_phase_async(target_repos, language, args)
 
     # Phase 4: Issue Generation
     await run_issue_gen_phase_async(
