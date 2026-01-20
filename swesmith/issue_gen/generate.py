@@ -69,6 +69,7 @@ litellm.suppress_debug_info = True
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
+
 class PortkeyModelConfig(BaseModel):
     model_name: str
     model_kwargs: dict[str, Any] = {}
@@ -83,7 +84,7 @@ class PortkeyModel:
             raise ImportError(
                 "The portkey-ai package is required to use PortkeyModel. Please install it with: pip install portkey-ai"
             )
-        
+
         self.config = config_class(**kwargs)
         self.cost = 0.0
         self.n_calls = 0
@@ -124,7 +125,10 @@ class PortkeyModel:
 
     def query(self, messages: list[dict[str, str]], **kwargs) -> Any:
         # Simple adapter to match what generate.py expects (return an object with choices and usage for cost)
-        response = self._query([{"role": msg["role"], "content": msg["content"]} for msg in messages], **kwargs)
+        response = self._query(
+            [{"role": msg["role"], "content": msg["content"]} for msg in messages],
+            **kwargs,
+        )
         return response
 
 
@@ -167,12 +171,17 @@ class IssueGen:
 
         # Initialize Portkey model if needed
         self.portkey_model = None
-        if self.model.startswith("portkey/") or self.config.get("provider") == "portkey":
+        if (
+            self.model.startswith("portkey/")
+            or self.config.get("provider") == "portkey"
+        ):
             self.portkey_model = PortkeyModel(
                 model_name=self.model.replace("portkey/", ""),
                 provider=self.config.get("provider", "openai"),
-                litellm_model_name_override=self.config.get("litellm_model_name_override", ""),
-                **settings.get("portkey_kwargs", {})
+                litellm_model_name_override=self.config.get(
+                    "litellm_model_name_override", ""
+                ),
+                **settings.get("portkey_kwargs", {}),
             )
 
         data_smith = [x for x in load_dataset(HF_DATASET, split="train")]
@@ -365,18 +374,23 @@ class IssueGen:
 
         # Generate n_instructions completions containing problem statements
         if self.portkey_model:
-            response = self.portkey_model.query(messages, n=self.n_instructions, stream=False)
+            response = self.portkey_model.query(
+                messages, n=self.n_instructions, stream=False
+            )
         else:
             response = completion(
-                model=self.model, messages=messages, n=self.n_instructions, temperature=0
+                model=self.model,
+                messages=messages,
+                n=self.n_instructions,
+                temperature=0,
             )
 
         model_for_cost = self.model
         if self.portkey_model and self.portkey_model.config.litellm_model_name_override:
             model_for_cost = self.portkey_model.config.litellm_model_name_override
-        
+
         cost = completion_cost(response, model=model_for_cost)
-            
+
         metadata["cost"] = (0 if "cost" not in metadata else metadata["cost"]) + cost
 
         # Extract problem statements from response

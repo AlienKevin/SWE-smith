@@ -523,7 +523,7 @@ _sandbox_rate_limiter = AsyncRateLimiter(SANDBOX_RATE_LIMIT)
     image=generator_image,
     secrets=[
         modal.Secret.from_name("GITHUB_TOKEN"),
-        modal.Secret.from_name("PORTKEY_API_KEY")
+        modal.Secret.from_name("PORTKEY_API_KEY"),
     ],
     timeout=MODAL_TIMEOUT,
     volumes={LOGS_MOUNT_PATH: logs_volume},  # Mount volume for direct writes
@@ -1885,11 +1885,11 @@ def issue_gen_remote(
     # Set up paths
     volume_root = Path(LOGS_MOUNT_PATH) / language
     task_insts_dir = volume_root / "task_insts"
-    
+
     # Resolve task instances file (it may have a hash suffix like repo__name.abcdef.json)
     task_insts_file = None
     repo_sanitized = repo.replace("/", "__")
-    
+
     if task_insts_dir.exists():
         for filename in os.listdir(task_insts_dir):
             # Check for exact match or match with suffix
@@ -1961,6 +1961,7 @@ def issue_gen_remote(
         instances_processed = 0
         if issue_gen_file.exists():
             import json
+
             with open(issue_gen_file) as f:
                 data = json.load(f)
                 instances_processed = len(data)
@@ -1973,6 +1974,7 @@ def issue_gen_remote(
 
     except Exception as e:
         import traceback
+
         return {
             "success": False,
             "repo": repo,
@@ -1996,9 +1998,9 @@ async def run_issue_gen_phase_async(
         issue_gen_workers: Number of workers per repo
         issue_gen_redo: Whether to regenerate existing issues
     """
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print(f"ISSUE GENERATION PHASE")
-    print(f"{'='*80}")
+    print(f"{'=' * 80}")
     print(f"Processing {len(repos)} repositories...")
     print(f"Config: {issue_gen_config}")
     print(f"Workers per repo: {issue_gen_workers}")
@@ -2015,14 +2017,15 @@ async def run_issue_gen_phase_async(
         },
         order_outputs=False,
     ):
-
         results.append(result)
 
         # Print progress
         completed = len(results)
         if result["success"]:
             instances = result.get("instances_processed", 0)
-            print(f"  [{completed}/{len(repos)}] {result['repo']}: ✓ ({instances} instances)")
+            print(
+                f"  [{completed}/{len(repos)}] {result['repo']}: ✓ ({instances} instances)"
+            )
         else:
             error = result.get("error", "Unknown error")
             print(f"  [{completed}/{len(repos)}] {result['repo']}: ✗ {error}")
@@ -2031,9 +2034,13 @@ async def run_issue_gen_phase_async(
 
     # Summary
     success = sum(1 for r in results if r["success"])
-    total_instances = sum(r.get("instances_processed", 0) for r in results if r["success"])
+    total_instances = sum(
+        r.get("instances_processed", 0) for r in results if r["success"]
+    )
 
-    print(f"\nIssue generation complete: {success}/{len(repos)} repos processed successfully.")
+    print(
+        f"\nIssue generation complete: {success}/{len(repos)} repos processed successfully."
+    )
     print(f"Total instances with issues: {total_instances}\n")
 
 
