@@ -277,6 +277,7 @@ class IssueGen:
         else:
             # If messages already exist, get repos_to_remove from existing metadata
             _, repos_to_remove = self.get_test_functions(instance_curr)
+            messages = metadata["messages"]
 
         # Generate n_instructions completions containing problem statements
         response = completion(

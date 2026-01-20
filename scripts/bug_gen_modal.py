@@ -295,8 +295,10 @@ generator_image = (
     modal.Image.from_registry("ubuntu:22.04", add_python="3.11")
     .apt_install("git")
     .pip_install_from_pyproject("pyproject.toml", optional_dependencies=["generate"])
+    .pip_install("jinja2", "litellm", "datasets", "pyyaml")
     .env({"PYTHONPATH": "/root"})
     .add_local_dir("swesmith", remote_path="/root/swesmith")
+    .add_local_dir("configs", remote_path="/root/configs")
     .add_local_file(".env", remote_path="/root/.env")
 )
 
@@ -1842,6 +1844,197 @@ async def run_gather_phase_async(repos: list[str], language: str, args) -> None:
 
 
 # ============================================================================
+# Issue Generation
+# ============================================================================
+
+
+@app.function(
+    image=generator_image,
+    volumes={LOGS_MOUNT_PATH: logs_volume},
+    timeout=3600,
+    secrets=[
+        modal.Secret.from_name("ANTHROPIC_API_KEY"),
+        modal.Secret.from_name("GITHUB_TOKEN"),
+    ],
+)
+def issue_gen_remote(
+    repo: str,
+    language: str,
+    config: str,
+    workers: int,
+) -> dict:
+    """Generate issue descriptions for a single repo's task instances.
+
+    Calls the existing swesmith.issue_gen.generate.IssueGen class to generate
+    issue descriptions for all task instances in a repo. Uses symlinks to redirect
+    local paths to Modal volume paths.
+
+    Args:
+        repo: Repository name (e.g., "astropy__astropy")
+        language: Programming language filter
+        config: Path to config file
+        workers: Number of workers per repo
+    """
+    import os
+    import sys
+    from pathlib import Path
+
+    # Set up paths
+    volume_root = Path(LOGS_MOUNT_PATH) / language
+    task_insts_dir = volume_root / "task_insts"
+    
+    # Resolve task instances file (it may have a hash suffix like repo__name.abcdef.json)
+    task_insts_file = None
+    repo_sanitized = repo.replace("/", "__")
+    
+    if task_insts_dir.exists():
+        for filename in os.listdir(task_insts_dir):
+            # Check for exact match or match with suffix
+            if filename == f"{repo_sanitized}.json" or (
+                filename.startswith(f"{repo_sanitized}.") and filename.endswith(".json")
+            ):
+                task_insts_file = task_insts_dir / filename
+                break
+
+    # Check if task instances file exists
+    if not task_insts_file or not task_insts_file.exists():
+        return {
+            "success": True,  # Not an error, just nothing to do
+            "repo": repo,
+            "instances_processed": 0,
+            "status": "skipped",
+            "reason": "No task insts file",
+        }
+
+    # Create symlinks to redirect local paths to volume paths
+    # This allows IssueGen to work with its expected local paths
+    local_logs = Path("/root/logs")
+    local_logs.mkdir(parents=True, exist_ok=True)
+
+    # Symlink the entire logs directory structure
+    for subdir in ["task_insts", "run_validation", "issue_gen"]:
+        local_subdir = local_logs / subdir
+        volume_subdir = volume_root / subdir
+
+        # Create the volume directory if it doesn't exist
+        volume_subdir.mkdir(parents=True, exist_ok=True)
+
+        # Create symlink (thread-safe with FileExistsError handling)
+        try:
+            if local_subdir.exists():
+                local_subdir.unlink()
+            local_subdir.symlink_to(volume_subdir)
+        except FileExistsError:
+            # Another concurrent task already created the symlink
+            pass
+
+    try:
+        # Import IssueGen after symlinks are set up
+        from swesmith.issue_gen.generate import IssueGen
+
+        # Verify config file exists
+        config_path = Path(config)
+        if not config_path.exists():
+            return {
+                "success": False,
+                "repo": repo,
+                "error": f"Config file not found: {config}",
+            }
+
+        # Set up IssueGen instance
+        issue_gen = IssueGen(
+            dataset_path=str(task_insts_file),
+            config_file=Path(config),
+            workers=workers,
+            redo_existing=False,
+        )
+
+        # Run issue generation
+        # This processes all instances in the repo using ThreadPoolExecutor
+        issue_gen.run()
+
+        # Count how many instances were processed
+        issue_gen_file = volume_root / "issue_gen" / f"{repo}.json"
+        instances_processed = 0
+        if issue_gen_file.exists():
+            import json
+            with open(issue_gen_file) as f:
+                data = json.load(f)
+                instances_processed = len(data)
+
+        return {
+            "success": True,
+            "repo": repo,
+            "instances_processed": instances_processed,
+        }
+
+    except Exception as e:
+        import traceback
+        return {
+            "success": False,
+            "repo": repo,
+            "error": f"{type(e).__name__}: {str(e)}",
+            "traceback": traceback.format_exc(),
+        }
+
+
+async def run_issue_gen_phase_async(
+    repos: list[str],
+    language: str,
+    issue_gen_config: str,
+    issue_gen_workers: int,
+) -> None:
+    """Run issue generation phase for all repos in parallel.
+
+    Args:
+        repos: List of repository names to process
+        language: Programming language filter
+        issue_gen_config: Path to config file
+        issue_gen_workers: Number of workers per repo
+        issue_gen_redo: Whether to regenerate existing issues
+    """
+    print(f"\n{'='*80}")
+    print(f"ISSUE GENERATION PHASE")
+    print(f"{'='*80}")
+    print(f"Processing {len(repos)} repositories...")
+    print(f"Config: {issue_gen_config}")
+    print(f"Workers per repo: {issue_gen_workers}")
+    print()
+
+    # Run issue generation in parallel across all repos
+    results = []
+    async for result in issue_gen_remote.map.aio(
+        repos,
+        kwargs={
+            "language": language,
+            "config": issue_gen_config,
+            "workers": issue_gen_workers,
+        },
+        order_outputs=False,
+    ):
+
+        results.append(result)
+
+        # Print progress
+        completed = len(results)
+        if result["success"]:
+            instances = result.get("instances_processed", 0)
+            print(f"  [{completed}/{len(repos)}] {result['repo']}: ✓ ({instances} instances)")
+        else:
+            error = result.get("error", "Unknown error")
+            print(f"  [{completed}/{len(repos)}] {result['repo']}: ✗ {error}")
+            if "traceback" in result:
+                print(f"    Traceback: {result['traceback'][:200]}...")
+
+    # Summary
+    success = sum(1 for r in results if r["success"])
+    total_instances = sum(r.get("instances_processed", 0) for r in results if r["success"])
+
+    print(f"\nIssue generation complete: {success}/{len(repos)} repos processed successfully.")
+    print(f"Total instances with issues: {total_instances}\n")
+
+
+# ============================================================================
 # Stats Display
 # ============================================================================
 
@@ -2158,6 +2351,8 @@ async def main(
     max_concurrent_tests: int = 900,
     show_stats: bool = False,
     gather: bool = False,
+    issue_gen_config: str = "configs/issue_gen/ig_v2.yaml",
+    issue_gen_workers: int = 8,
 ):
     """
     Modal Bug Generation & Validation script.
@@ -2166,6 +2361,7 @@ async def main(
     1. Generation: Creates bugs for repos (skips repos that are already done/failed)
     2. Validation: Validates all patches from the volume
     3. Gather: Creates task instances and pushes branches
+    4. Issue Generation: Generates issue descriptions for valid bugs
 
     Run with: modal run scripts/bug_gen.py [OPTIONS]
 
@@ -2179,6 +2375,8 @@ async def main(
         max_concurrent_tests: Max concurrent tests (default: 900)
         show_stats: If True, show bug breakdown stats and exit without running generation/validation
         gather: If True, only run the gather phase (skip generation and validation)
+        issue_gen_config: Path to issue generation config (default: configs/issue_gen/ig_v2.yaml)
+        issue_gen_workers: Number of workers per repo for issue generation (default: 4)
     """
     # Handle --show-stats early exit
     if show_stats:
@@ -2206,7 +2404,6 @@ async def main(
 
     print(f"\n{'=' * 60}")
     print(f"BUG GEN - {len(target_repos)} repos, {max_concurrent_tests} max concurrent")
-    print(f"Volume: {VOLUME_NAME}/{language}/")
     print(f"{'=' * 60}\n")
 
     # Create a simple args-like object for compatibility
@@ -2218,8 +2415,11 @@ async def main(
     args.interleave = interleave
     args.max_entities = max_entities
     args.max_candidates = max_candidates
+    args.timeout_buffer = 60
+    args.max_concurrent_tests = max_concurrent_tests
 
     # Phase 1: Generation (skips repos that are already done/failed)
+    generation_results = []
     if not gather:
         generation_results = await run_generation_phase(target_repos, args, language)
 
@@ -2248,9 +2448,17 @@ async def main(
     else:
         results = []
 
-    # Phase 3: Gather (Create task instances & Push branches)
-    if not results and not gather:
-        print("No validation results found. Skipping gather phase.")
-        return
+    # # Phase 3: Gather (Create task instances & Push branches)
+    # if not results and not gather:
+    #     print("No validation results found. Skipping gather phase.")
+    #     return
 
-    await run_gather_phase_async(target_repos, language, args)
+    # await run_gather_phase_async(target_repos, language, args)
+
+    # Phase 4: Issue Generation
+    await run_issue_gen_phase_async(
+        target_repos,
+        language,
+        issue_gen_config,
+        issue_gen_workers,
+    )
