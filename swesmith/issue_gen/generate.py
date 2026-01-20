@@ -46,10 +46,86 @@ from swesmith.harness.utils import (
 )
 from swesmith.issue_gen.utils import get_test_function
 from swesmith.profiles import registry
+from typing import Any, Literal
+from tenacity import (
+    retry,
+    retry_if_not_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+    before_sleep_log,
+)
+from pydantic import BaseModel
+
+try:
+    from portkey_ai import Portkey
+except ImportError:
+    Portkey = None
 
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 litellm.drop_params = True
 litellm.suppress_debug_info = True
+
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
+
+class PortkeyModelConfig(BaseModel):
+    model_name: str
+    model_kwargs: dict[str, Any] = {}
+    provider: str = ""
+    litellm_model_name_override: str = ""
+    cost_tracking: Literal["default", "ignore_errors"] = "default"
+
+
+class PortkeyModel:
+    def __init__(self, *, config_class: type = PortkeyModelConfig, **kwargs):
+        if Portkey is None:
+            raise ImportError(
+                "The portkey-ai package is required to use PortkeyModel. Please install it with: pip install portkey-ai"
+            )
+        
+        self.config = config_class(**kwargs)
+        self.cost = 0.0
+        self.n_calls = 0
+
+        # Get API key from environment or raise error
+        self._api_key = os.getenv("PORTKEY_API_KEY")
+        if not self._api_key:
+            raise ValueError(
+                "Portkey API key is required. Set it via the "
+                "PORTKEY_API_KEY environment variable."
+            )
+
+        # Get virtual key from environment
+        virtual_key = os.getenv("PORTKEY_VIRTUAL_KEY")
+
+        # Initialize Portkey client
+        client_kwargs = {"api_key": self._api_key}
+        if virtual_key:
+            client_kwargs["virtual_key"] = virtual_key
+        elif self.config.provider:
+            client_kwargs["provider"] = self.config.provider
+
+        self.client = Portkey(**client_kwargs)
+
+    @retry(
+        reraise=True,
+        stop=stop_after_attempt(10),
+        wait=wait_exponential(multiplier=1, min=4, max=60),
+        retry=retry_if_not_exception_type((KeyboardInterrupt, TypeError, ValueError)),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+    )
+    def _query(self, messages: list[dict[str, str]], **kwargs):
+        return self.client.chat.completions.create(
+            model=self.config.model_name,
+            messages=messages,
+            **(self.config.model_kwargs | kwargs),
+        )
+
+    def query(self, messages: list[dict[str, str]], **kwargs) -> Any:
+        # Simple adapter to match what generate.py expects (return an object with choices and usage for cost)
+        response = self._query([{"role": msg["role"], "content": msg["content"]} for msg in messages], **kwargs)
+        return response
 
 
 TEST_SRC_CODE_PROMPT = r"""
@@ -60,9 +136,6 @@ Use the following test source code to help you write reasonable, effective repro
 """
 
 load_dotenv()
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger(__name__)
 
 
 def maybe_shorten(text_str: str, max_tokens: int, model: str) -> str:
@@ -91,6 +164,16 @@ class IssueGen:
         settings = self.config.get("settings", {})
         self.n_instructions = settings.get("n_instructions", 1)
         self.max_var_tokens = settings.get("max_var_tokens", 10_000)
+
+        # Initialize Portkey model if needed
+        self.portkey_model = None
+        if self.model.startswith("portkey/") or self.config.get("provider") == "portkey":
+            self.portkey_model = PortkeyModel(
+                model_name=self.model.replace("portkey/", ""),
+                provider=self.config.get("provider", "openai"),
+                litellm_model_name_override=self.config.get("litellm_model_name_override", ""),
+                **settings.get("portkey_kwargs", {})
+            )
 
         data_smith = [x for x in load_dataset(HF_DATASET, split="train")]
         self.dataset = (
@@ -138,6 +221,7 @@ class IssueGen:
         self, instance: dict, instance_ids: list | None, redo_existing: bool, model: str
     ) -> bool:
         repo = instance["repo"].split("/")[-1]
+
         output_file = LOG_DIR_ISSUE_GEN / repo / f"{instance[KEY_INSTANCE_ID]}.json"
         if not matches_instance_filter(instance[KEY_INSTANCE_ID], instance_ids):
             return False
@@ -280,11 +364,19 @@ class IssueGen:
             messages = metadata["messages"]
 
         # Generate n_instructions completions containing problem statements
-        response = completion(
-            model=self.model, messages=messages, n=self.n_instructions, temperature=0
-        )
+        if self.portkey_model:
+            response = self.portkey_model.query(messages, n=self.n_instructions, stream=False)
+        else:
+            response = completion(
+                model=self.model, messages=messages, n=self.n_instructions, temperature=0
+            )
 
-        cost = completion_cost(response)
+        model_for_cost = self.model
+        if self.portkey_model and self.portkey_model.config.litellm_model_name_override:
+            model_for_cost = self.portkey_model.config.litellm_model_name_override
+        
+        cost = completion_cost(response, model=model_for_cost)
+            
         metadata["cost"] = (0 if "cost" not in metadata else metadata["cost"]) + cost
 
         # Extract problem statements from response
@@ -342,6 +434,20 @@ class IssueGen:
 
         # Track repos to remove for cleanup
         all_repos_to_remove = set()
+
+        # Pre-clone all required repositories to avoid race conditions in parallel execution
+        # (RepoProfile.clone is not thread-safe)
+        unique_repos = {instance["repo"].split("/")[-1] for instance in self.dataset}
+        for repo_name in unique_repos:
+            try:
+                # registry.get(repo_name).clone() returns (dest, cloned)
+                # cloned is True if it actually cloned, False if it already existed
+                _, cloned = registry.get(repo_name).clone()
+                if cloned:
+                    all_repos_to_remove.add(repo_name)
+            except Exception as e:
+                logger.error(f"Failed to pre-clone {repo_name}: {e}")
+                # We continue, assuming it might work later or will fail properly in the thread
 
         # Create a thread pool and call generate_issue for each instance
         with ThreadPoolExecutor(max_workers=self.workers) as executor:

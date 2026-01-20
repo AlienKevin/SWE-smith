@@ -521,7 +521,10 @@ _sandbox_rate_limiter = AsyncRateLimiter(SANDBOX_RATE_LIMIT)
 
 @app.function(
     image=generator_image,
-    secrets=[modal.Secret.from_name("GITHUB_TOKEN")],
+    secrets=[
+        modal.Secret.from_name("GITHUB_TOKEN"),
+        modal.Secret.from_name("PORTKEY_API_KEY")
+    ],
     timeout=MODAL_TIMEOUT,
     volumes={LOGS_MOUNT_PATH: logs_volume},  # Mount volume for direct writes
 )
@@ -1853,8 +1856,8 @@ async def run_gather_phase_async(repos: list[str], language: str, args) -> None:
     volumes={LOGS_MOUNT_PATH: logs_volume},
     timeout=3600,
     secrets=[
-        modal.Secret.from_name("ANTHROPIC_API_KEY"),
         modal.Secret.from_name("GITHUB_TOKEN"),
+        modal.Secret.from_name("PORTKEY_API_KEY"),
     ],
 )
 def issue_gen_remote(
