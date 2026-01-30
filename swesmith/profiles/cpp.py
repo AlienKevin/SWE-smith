@@ -12,7 +12,12 @@ class CppProfile(RepoProfile):
     Profile for C++ repositories.
     """
 
-    exts: list[str] = field(default_factory=lambda: [".cpp"])
+    # Use personal Docker Hub for C++ testing.
+    org_dh: str = "zhehaoli1999"
+    # C++ images are currently published as x86_64 only.
+    arch: str = "x86_64"
+    pltf: str = "linux/x86_64"
+    exts: list[str] = field(default_factory=lambda: [".cpp", ".cc", ".cxx", ".h", ".hpp"])
 
 
 @dataclass
@@ -88,7 +93,8 @@ class Spdlog8806ca65(CppProfile):
     owner: str = "gabime"
     repo: str = "spdlog"
     commit: str = "8806ca6509f037cf7612ea292338e3b222209dc1"
-    test_cmd: str = "cd build && ctest"
+    test_cmd: str = "cd build && cmake --build . -j$(nproc) && ctest --output-on-failure --verbose"
+    timeout: int = 300
     org_dh: str = "zhehaoli1999"  # Docker Hub username
     org_gh: str = "zhehaoli1999"  # GitHub username (for personal account)
 
@@ -165,7 +171,7 @@ class Eigen9b00db8c(CppProfile):
     owner: str = "libeigen"
     repo: str = "eigen"
     commit: str = "9b00db8cb9154477b93b342cf418b5da5d7f58a0"
-    test_cmd: str = "cd build && ctest"
+    test_cmd: str = "cd build && cmake --build . -j$(nproc) && ctest --output-on-failure --continue-on-failure --timeout 3600 --verbose"
     timeout: int = (
         1800  # 30 minutes - Eigen test suite is large and can take a long time
     )
@@ -251,10 +257,10 @@ class FmtEc73fb72(CppProfile):
     owner: str = "fmtlib"
     repo: str = "fmt"
     commit: str = "ec73fb72"
-    test_cmd: str = "cd build && ctest"
+    test_cmd: str = "cd build && cmake --build . -j$(nproc) && ctest --output-on-failure --continue-on-failure --timeout 3600 --verbose"
     timeout: int = 600  # 10 minutes - fmt test suite is smaller than Eigen
     timeout_ref: int = 1200  # 20 minutes for reference runs
-    org_dh: str = "cs329a-swesmith-repos"  # Docker Hub username
+    org_dh: str = "zhehaoli1999"  # Docker Hub username
     org_gh: str = "cs329a-swesmith-repos"  # GitHub username (for personal account)
 
     @property
@@ -337,4 +343,8 @@ for name, obj in list(globals().items()):
         and issubclass(obj, CppProfile)
         and obj.__name__ != "CppProfile"
     ):
+        # NOTE: Catch29b3f508a is not uploaded to zhehaoli1999's Docker Hub yet.
+        # Skip it for now to avoid failed pulls during Modal validation.
+        if obj.__name__ == "Catch29b3f508a":
+            continue
         registry.register_profile(obj)

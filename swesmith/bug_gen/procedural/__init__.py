@@ -7,9 +7,10 @@ respective subdirectories (e.g., python/, javascript/, java/).
 """
 
 # For backward compatibility, expose Python-specific classes
+from swesmith.bug_gen.procedural.cpp import MODIFIERS_CPP
 from swesmith.bug_gen.procedural.golang import MODIFIERS_GOLANG
-from swesmith.bug_gen.procedural.python import MODIFIERS_PYTHON
 from swesmith.bug_gen.procedural.javascript import MODIFIERS_JAVASCRIPT
+from swesmith.bug_gen.procedural.python import MODIFIERS_PYTHON
 from swesmith.bug_gen.procedural.rust import MODIFIERS_RUST
 
 MAP_EXT_TO_MODIFIERS = {
@@ -17,4 +18,9 @@ MAP_EXT_TO_MODIFIERS = {
     ".py": MODIFIERS_PYTHON,
     ".js": MODIFIERS_JAVASCRIPT,
     ".rs": MODIFIERS_RUST,
+    ".cpp": MODIFIERS_CPP,
+    ".cc": MODIFIERS_CPP,
+    ".cxx": MODIFIERS_CPP,
+    ".hpp": MODIFIERS_CPP,
+    ".h": MODIFIERS_CPP,
 }
