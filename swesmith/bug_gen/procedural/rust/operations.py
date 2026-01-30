@@ -84,9 +84,6 @@ class OperationChangeModifier(RustProceduralModifier):
 
     def modify(self, code_entity: CodeEntity) -> BugRewrite:
         """Apply operation changes to Rust binary expressions."""
-        if not self.flip():
-            return None
-
         parser = Parser(RUST_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
 
@@ -156,9 +153,6 @@ class OperationFlipOperatorModifier(RustProceduralModifier):
 
     def modify(self, code_entity: CodeEntity) -> BugRewrite:
         """Apply operator flipping to Rust binary expressions."""
-        if not self.flip():
-            return None
-
         parser = Parser(RUST_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
 
@@ -226,9 +220,6 @@ class OperationSwapOperandsModifier(RustProceduralModifier):
 
     def modify(self, code_entity: CodeEntity) -> BugRewrite:
         """Apply operand swapping to Rust binary expressions."""
-        if not self.flip():
-            return None
-
         parser = Parser(RUST_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
 
@@ -295,9 +286,6 @@ class OperationBreakChainsModifier(RustProceduralModifier):
 
     def modify(self, code_entity: CodeEntity) -> BugRewrite:
         """Apply chain breaking to Rust binary expressions."""
-        if not self.flip():
-            return None
-
         parser = Parser(RUST_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
 
@@ -367,9 +355,6 @@ class OperationChangeConstantsModifier(RustProceduralModifier):
 
     def modify(self, code_entity: CodeEntity) -> BugRewrite:
         """Apply constant changes to Rust binary expressions."""
-        if not self.flip():
-            return None
-
         parser = Parser(RUST_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
 
