@@ -276,14 +276,14 @@ def resolve_profile(repo_name: str):
 
     try:
         profile = registry.get(repo_name)
-        _normalize_profile_arch(profile)
+        profile.arch = "x86_64"
         return profile
     except KeyError:
         for key in registry.keys():
             try:
                 p = registry.get(key)
                 if f"{p.owner}/{p.repo}" == repo_name:
-                    _normalize_profile_arch(p)
+                    p.arch = "x86_64"
                     return p
             except Exception:
                 continue
@@ -305,123 +305,12 @@ generator_image = (
 
 # Global cache for validator images - populated by prebuild_validator_images()
 _validator_image_cache: dict[str, modal.Image] = {}
-# Global mapping from image_name -> profile (for Dockerfile-based builds)
-_image_name_to_profile: dict[str, object] = {}
-_registry_image_exists_cache: dict[str, bool] = {}
-
-
-def _registry_image_exists(image_name: str) -> bool:
-    """Best-effort check whether a Docker image exists in the registry.
-
-    Uses `docker manifest inspect` when available (fast, no pull). If Docker
-    isn't available, assumes the image exists and lets Modal surface any error.
-    """
-    cached = _registry_image_exists_cache.get(image_name)
-    if cached is not None:
-        return cached
-
-    import subprocess
-
-    try:
-        subprocess.run(
-            ["docker", "manifest", "inspect", image_name],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=15,
-        )
-        exists = True
-    except FileNotFoundError:
-        # Docker CLI not available; assume it exists.
-        exists = True
-    except subprocess.TimeoutExpired:
-        exists = False
-    except subprocess.CalledProcessError:
-        exists = False
-
-    _registry_image_exists_cache[image_name] = exists
-    return exists
-
-
-def _normalize_profile_arch(profile) -> None:
-    """Ensure the profile uses an image architecture available in the registry.
-
-    Many SWE-bench images are published for `x86_64` only. When running this script
-    from an `arm64` workstation, profiles default to `arm64`, which can trigger
-    expensive Dockerfile builds. Prefer an architecture that exists in the
-    registry, with an env override via `SWESMITH_IMAGE_ARCH`.
-    """
-    import os
-
-    forced_arch = os.getenv("SWESMITH_IMAGE_ARCH")
-    if forced_arch:
-        profile.arch = forced_arch
-        return
-
-    # Modal sandboxes typically run on x86_64. On Apple Silicon (arm64), defaulting
-    # to arm64 images can accidentally trigger expensive Dockerfile builds.
-    try:
-        import platform
-
-        if platform.machine() in {"aarch64", "arm64"}:
-            profile.arch = "x86_64"
-            return
-    except Exception:
-        pass
-
-    # If the current image exists, keep it.
-    try:
-        if _registry_image_exists(profile.image_name):
-            return
-    except Exception:
-        return
-
-    original_arch = getattr(profile, "arch", None)
-
-    # Try known arches; prefer x86_64 first.
-    for candidate_arch in ("x86_64", "arm64"):
-        if candidate_arch == original_arch:
-            continue
-        try:
-            profile.arch = candidate_arch
-        except Exception:
-            continue
-        try:
-            if _registry_image_exists(profile.image_name):
-                return
-        except Exception:
-            continue
-
-    # Restore if nothing exists.
-    if original_arch is not None:
-        try:
-            profile.arch = original_arch
-        except Exception:
-            pass
 
 
 def _create_validator_image(image_name: str) -> modal.Image:
-    """Create a validator image for the given Docker image name (internal helper).
-
-    Prefer pulling pre-built images from the registry; fall back to building from
-    the profile's Dockerfile only when the registry image is missing.
-    """
-    profile = _image_name_to_profile.get(image_name)
-    if profile and hasattr(profile, "dockerfile") and not _registry_image_exists(
-        image_name
-    ):
-        import tempfile, os
-        # Write Dockerfile to temp file and build from it
-        tmpdir = tempfile.mkdtemp()
-        dockerfile_path = os.path.join(tmpdir, "Dockerfile")
-        with open(dockerfile_path, "w") as f:
-            f.write(profile.dockerfile)
-        base_image = modal.Image.from_dockerfile(dockerfile_path, add_python="3.11")
-    else:
-        base_image = modal.Image.from_registry(image_name, add_python="3.11")
-
+    """Create a validator image for the given Docker image name (internal helper)."""
     return (
-        base_image
+        modal.Image.from_registry(image_name, add_python="3.11")
         .pip_install_from_pyproject(
             "pyproject.toml", optional_dependencies=["validate"]
         )
@@ -459,14 +348,12 @@ async def prebuild_validator_images_async(
     """
     global _validator_image_cache
 
-    # Collect unique image names and register profiles for Dockerfile builds
-    global _image_name_to_profile
+    # Collect unique image names
     unique_images = set()
     for repo, info in repos_with_patches.items():
         profile = info["profile"]
         if hasattr(profile, "image_name") and profile.image_name:
             unique_images.add(profile.image_name)
-            _image_name_to_profile[profile.image_name] = profile
 
     print(f"\n{'=' * 60}")
     print(f"PRE-BUILDING VALIDATOR IMAGES ({len(unique_images)} unique images)")
