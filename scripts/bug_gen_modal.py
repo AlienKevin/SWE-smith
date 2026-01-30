@@ -2360,18 +2360,18 @@ async def main(
     max_candidates: int = 2000,
     max_concurrent_tests: int = 900,
     show_stats: bool = False,
-    gather: bool = False,
+    phases: str = "gen,val,gather,issue",
     issue_gen_config: str = "configs/issue_gen/ig_v2.yaml",
     issue_gen_workers: int = 8,
 ):
     """
     Modal Bug Generation & Validation script.
 
-    Runs two phases:
-    1. Generation: Creates bugs for repos (skips repos that are already done/failed)
-    2. Validation: Validates all patches from the volume
-    3. Gather: Creates task instances and pushes branches
-    4. Issue Generation: Generates issue descriptions for valid bugs
+    Runs phases specified by --phases (comma-separated):
+    - gen: Generation (creates bugs for repos)
+    - val: Validation (validates patches from volume)
+    - gather: Gather (creates task instances & pushes branches)
+    - issue: Issue Generation (generates issue descriptions)
 
     Run with: modal run scripts/bug_gen.py [OPTIONS]
 
@@ -2384,7 +2384,7 @@ async def main(
         max_candidates: Max candidates to process, -1 for all (default: 2000)
         max_concurrent_tests: Max concurrent tests (default: 900)
         show_stats: If True, show bug breakdown stats and exit without running generation/validation
-        gather: If True, only run the gather phase (skip generation and validation)
+        phases: Comma-separated list of phases to run (default: "gen,val,gather,issue")
         issue_gen_config: Path to issue generation config (default: configs/issue_gen/ig_v2.yaml)
         issue_gen_workers: Number of workers per repo for issue generation (default: 4)
     """
@@ -2392,6 +2392,19 @@ async def main(
     if show_stats:
         await show_volume_stats(language)
         return
+
+    # Parse and validate phases
+    valid_phases = {"gen", "val", "gather", "issue"}
+    phase_list = [p.strip() for p in phases.split(",") if p.strip()]
+    active_phases = set(phase_list)
+
+    invalid_phases = active_phases - valid_phases
+    if invalid_phases:
+        print(f"Error: Invalid phases: {invalid_phases}")
+        print(f"Valid phases are: {valid_phases}")
+        return
+
+    print(f"Running phases: {', '.join(sorted(active_phases))}")
 
     from swesmith.constants import ENV_NAME
 
@@ -2430,10 +2443,12 @@ async def main(
 
     # Phase 1: Generation (skips repos that are already done/failed)
     generation_results = []
-    if not gather:
+    if "gen" in active_phases:
         generation_results = await run_generation_phase(target_repos, args, language)
 
-        # Phase 2: Validation - collect ALL patches from volume (not just from this run)
+    # Phase 2: Validation - collect ALL patches from volume (not just from this run)
+    results = []
+    if "val" in active_phases:
         print(f"\n{'#' * 60}")
         print("# PHASE 2: VALIDATION")
         print(f"{'#' * 60}\n")
@@ -2449,26 +2464,22 @@ async def main(
         if results:
             print_summary(results, len(build_repos_with_patches(all_patches)))
 
-        # Report generation errors from this run
-        errors = [r for r in generation_results if "error" in r]
-        if errors:
-            print(f"\nGeneration Errors ({len(errors)}):")
-            for err in errors:
-                print(f"  - {err['repo']}: {err.get('error', 'Unknown')}")
-    else:
-        results = []
+    # Report generation errors from this run (if any)
+    errors = [r for r in generation_results if "error" in r]
+    if errors:
+        print(f"\nGeneration Errors ({len(errors)}):")
+        for err in errors:
+            print(f"  - {err['repo']}: {err.get('error', 'Unknown')}")
 
     # Phase 3: Gather (Create task instances & Push branches)
-    if not results and not gather:
-        print("No validation results found. Skipping gather phase.")
-        return
-
-    await run_gather_phase_async(target_repos, language, args)
+    if "gather" in active_phases:
+        await run_gather_phase_async(target_repos, language, args)
 
     # Phase 4: Issue Generation
-    await run_issue_gen_phase_async(
-        target_repos,
-        language,
-        issue_gen_config,
-        issue_gen_workers,
-    )
+    if "issue" in active_phases:
+        await run_issue_gen_phase_async(
+            target_repos,
+            language,
+            issue_gen_config,
+            issue_gen_workers,
+        )
