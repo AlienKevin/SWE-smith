@@ -6,6 +6,22 @@ from swesmith.constants import ENV_NAME
 from swesmith.profiles.base import RepoProfile, registry
 
 
+DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE = [
+    # Docs / metadata.
+    "/doc",
+    "/docs",
+    # Examples / benchmarks are typically not covered by ctest.
+    "/bench",
+    "/benchmark",
+    "/example",
+    "/examples",
+    # Build / tooling.
+    "/cmake",
+    "/scripts",
+    "/tools",
+]
+
+
 @dataclass
 class CppProfile(RepoProfile):
     """
@@ -18,6 +34,27 @@ class CppProfile(RepoProfile):
     arch: str = "x86_64"
     pltf: str = "linux/x86_64"
     exts: list[str] = field(default_factory=lambda: [".cpp", ".cc", ".cxx", ".h", ".hpp"])
+    # Exclude directories that are typically not built/executed by unit tests.
+    bug_gen_dirs_exclude: list[str] = field(
+        default_factory=lambda: list(DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE)
+    )
+
+    def extract_entities(
+        self,
+        dirs_exclude: list[str] | None = None,
+        dirs_include: list[str] = [],
+        exclude_tests: bool = True,
+        max_entities: int = -1,
+    ) -> list:
+        if dirs_exclude is None:
+            dirs_exclude = []
+        merged_excludes = [*dirs_exclude, *self.bug_gen_dirs_exclude]
+        return super().extract_entities(
+            dirs_exclude=merged_excludes,
+            dirs_include=dirs_include,
+            exclude_tests=exclude_tests,
+            max_entities=max_entities,
+        )
 
 
 @dataclass
@@ -171,6 +208,15 @@ class Eigen9b00db8c(CppProfile):
     owner: str = "libeigen"
     repo: str = "eigen"
     commit: str = "9b00db8cb9154477b93b342cf418b5da5d7f58a0"
+    # Exclude directories that are mostly not built/covered by the default test suite.
+    bug_gen_dirs_exclude: list[str] = field(
+        default_factory=lambda: [
+            *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
+            "/unsupported",
+            "/blas",
+            "/Eigen/src/Core/arch",
+        ]
+    )
     test_cmd: str = "cd build && cmake --build . -j$(nproc) && ctest --output-on-failure --continue-on-failure --timeout 3600 --verbose"
     timeout: int = (
         1800  # 30 minutes - Eigen test suite is large and can take a long time

@@ -10,6 +10,7 @@ import argparse
 import json
 import random
 import shutil
+import subprocess
 import time
 
 from pathlib import Path
@@ -44,22 +45,41 @@ def _process_candidate(
     if not bug:
         return False
 
-    # Create artifacts
-    bug_dir = get_bug_directory(log_dir, candidate)
-    bug_dir.mkdir(parents=True, exist_ok=True)
     uuid_str = f"{pm.name}__{bug.get_hash()}"
     metadata_path = f"{PREFIX_METADATA}__{uuid_str}.json"
     bug_path = f"{PREFIX_BUG}__{uuid_str}.diff"
 
+    try:
+        apply_code_change(candidate, bug)
+        patch = get_patch(repo, reset_changes=True)
+    except Exception:
+        # Best-effort cleanup: keep the repo in a clean state so a single bad
+        # candidate doesn't abort the whole generation run.
+        subprocess.run(
+            ["git", "-C", repo, "reset", "--hard"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        subprocess.run(
+            ["git", "-C", repo, "clean", "-fdx"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return False
+
+    if not patch:
+        return False
+
+    # Create artifacts only after confirming we have a real patch.
+    bug_dir = get_bug_directory(log_dir, candidate)
+    bug_dir.mkdir(parents=True, exist_ok=True)
     with open(bug_dir / metadata_path, "w") as f:
         json.dump(bug.to_dict(), f, indent=2)
-    apply_code_change(candidate, bug)
-    patch = get_patch(repo, reset_changes=True)
-    if patch:
-        with open(bug_dir / bug_path, "w") as f:
-            f.write(patch)
-        return True
-    return False
+    with open(bug_dir / bug_path, "w") as f:
+        f.write(patch)
+    return True
 
 
 def main(
