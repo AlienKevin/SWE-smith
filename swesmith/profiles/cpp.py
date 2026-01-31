@@ -221,17 +221,19 @@ class Eigen9b00db8c(CppProfile):
     # NOTE: Eigen's CMake defaults exclude most test executables from the `all` target,
     # which makes `ctest` report huge numbers of `***Not Run` due to missing binaries.
     #
-    # Setting `EIGEN_LEAVE_TEST_IN_ALL_TARGET=ON` fixes this, and disabling the BLAS/LAPACK
-    # targets avoids unrelated baseline failures and reduces rebuild work per patch.
+    # Instead of building the full test suite (very slow per patch), build and run the
+    # `smoketest` label subset. This still exercises real binaries, but stays tractable.
     test_cmd: str = (
         "cd build"
         " && cmake .."
         " -DEIGEN_BUILD_TESTING=ON"
-        " -DEIGEN_LEAVE_TEST_IN_ALL_TARGET=ON"
         " -DEIGEN_BUILD_BLAS=OFF"
         " -DEIGEN_BUILD_LAPACK=OFF"
-        " && cmake --build . -j$(nproc)"
-        " && ctest --output-on-failure --continue-on-failure --timeout 3600 --verbose"
+        " && SMOKETEST_TARGETS=$(ctest -N -L smoketest"
+        " | sed -n 's/^ *Test #[0-9]\\+: //p'"
+        " | tr '\\n' ' ')"
+        " && cmake --build . -j$(nproc) --target $SMOKETEST_TARGETS"
+        " && ctest -L smoketest --output-on-failure --continue-on-failure --timeout 3600 --verbose"
     )
     timeout: int = (
         1800  # 30 minutes - Eigen test suite is large and can take a long time
@@ -265,7 +267,6 @@ WORKDIR /testbed
 RUN mkdir build && cd build \
     && cmake .. \
         -DEIGEN_BUILD_TESTING=ON \
-        -DEIGEN_LEAVE_TEST_IN_ALL_TARGET=ON \
         -DEIGEN_BUILD_BLAS=OFF \
         -DEIGEN_BUILD_LAPACK=OFF \
     && cmake --build . -j$(nproc)
