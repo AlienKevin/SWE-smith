@@ -212,12 +212,27 @@ class Eigen9b00db8c(CppProfile):
     bug_gen_dirs_exclude: list[str] = field(
         default_factory=lambda: [
             *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
+            "/demos",
             "/unsupported",
             "/blas",
             "/Eigen/src/Core/arch",
         ]
     )
-    test_cmd: str = "cd build && cmake --build . -j$(nproc) && ctest --output-on-failure --continue-on-failure --timeout 3600 --verbose"
+    # NOTE: Eigen's CMake defaults exclude most test executables from the `all` target,
+    # which makes `ctest` report huge numbers of `***Not Run` due to missing binaries.
+    #
+    # Setting `EIGEN_LEAVE_TEST_IN_ALL_TARGET=ON` fixes this, and disabling the BLAS/LAPACK
+    # targets avoids unrelated baseline failures and reduces rebuild work per patch.
+    test_cmd: str = (
+        "cd build"
+        " && cmake .."
+        " -DEIGEN_BUILD_TESTING=ON"
+        " -DEIGEN_LEAVE_TEST_IN_ALL_TARGET=ON"
+        " -DEIGEN_BUILD_BLAS=OFF"
+        " -DEIGEN_BUILD_LAPACK=OFF"
+        " && cmake --build . -j$(nproc)"
+        " && ctest --output-on-failure --continue-on-failure --timeout 3600 --verbose"
+    )
     timeout: int = (
         1800  # 30 minutes - Eigen test suite is large and can take a long time
     )
@@ -248,7 +263,11 @@ WORKDIR /testbed
 
 # Build and test spdlog
 RUN mkdir build && cd build \
-    && cmake .. -DBUILD_TESTING=ON \
+    && cmake .. \
+        -DEIGEN_BUILD_TESTING=ON \
+        -DEIGEN_LEAVE_TEST_IN_ALL_TARGET=ON \
+        -DEIGEN_BUILD_BLAS=OFF \
+        -DEIGEN_BUILD_LAPACK=OFF \
     && cmake --build . -j$(nproc)
     
 RUN cd build && ctest --output-on-failure --continue-on-failure --timeout 36000 --verbose || true
