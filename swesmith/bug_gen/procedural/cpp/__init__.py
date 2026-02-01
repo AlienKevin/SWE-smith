@@ -24,15 +24,19 @@ from swesmith.bug_gen.procedural.cpp.replace_strings import (
 )
 
 MODIFIERS_CPP: list[ProceduralModifier] = [
-    ControlIfElseInvertModifier(likelihood=1.0),  # Increased from 0.2 - very effective
-    ControlShuffleLinesModifier(likelihood=0.2),
-    RemoveAssignModifier(likelihood=0.2),
-    RemoveConditionalModifier(likelihood=0.25),
-    RemoveLoopModifier(likelihood=0.25),
-    OperationBreakChainsModifier(likelihood=0.9),
-    OperationChangeConstantsModifier(likelihood=0.3),
-    OperationChangeModifier(likelihood=1.0),
-    OperationFlipOperatorModifier(likelihood=1.0),
-    OperationSwapOperandsModifier(likelihood=1.0),
-    ReplaceStringTypoModifier(likelihood=1.0),
+    # Control flow modifiers
+    ControlIfElseInvertModifier(likelihood=0.5),
+    ControlShuffleLinesModifier(likelihood=0.5),
+    # Remove modifiers
+    RemoveAssignModifier(likelihood=0.5),
+    RemoveConditionalModifier(likelihood=0.5),
+    RemoveLoopModifier(likelihood=0.5),
+    # Operation modifiers
+    OperationBreakChainsModifier(likelihood=0.5),
+    OperationChangeConstantsModifier(likelihood=0.5),
+    OperationChangeModifier(likelihood=0.5),
+    OperationFlipOperatorModifier(likelihood=0.5),
+    OperationSwapOperandsModifier(likelihood=0.5),
+    # String modifiers
+    ReplaceStringTypoModifier(likelihood=0.5),
 ]
