@@ -275,12 +275,15 @@ def resolve_profile(repo_name: str):
     from swesmith.profiles import registry
 
     try:
-        return registry.get(repo_name)
+        profile = registry.get(repo_name)
+        profile.arch = "x86_64"
+        return profile
     except KeyError:
         for key in registry.keys():
             try:
                 p = registry.get(key)
                 if f"{p.owner}/{p.repo}" == repo_name:
+                    p.arch = "x86_64"
                     return p
             except Exception:
                 continue
