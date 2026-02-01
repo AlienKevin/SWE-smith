@@ -65,10 +65,10 @@ class RemoveLoopModifier(CppProceduralModifier):
 
     def _find_loops(self, node, candidates):
         """Find loop statements."""
-        # C++ loop types: for_statement, range_for_statement, while_statement, do_statement
+        # C++ loop types: for_statement, for_range_loop, while_statement, do_statement
         if node.type in [
             "for_statement",
-            "range_for_statement",
+            "for_range_loop",
             "while_statement",
             "do_statement",
         ]:

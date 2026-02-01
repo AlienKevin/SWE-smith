@@ -27,7 +27,7 @@ class CPlusPlusEntity(CodeEntity):
                 "for_statement",
                 "while_statement",
                 "do_statement",
-                "range_for_statement",
+                "for_range_loop",
             ]:
                 self._tags.add(CodeProperty.HAS_LOOP)
             if node.type == "if_statement":
@@ -91,7 +91,7 @@ class CPlusPlusEntity(CodeEntity):
                 "while_statement",
                 "for_statement",
                 "do_statement",
-                "range_for_statement",
+                "for_range_loop",
             ]:
                 complexity += 1
             # Exception handling

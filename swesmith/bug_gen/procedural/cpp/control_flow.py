@@ -59,22 +59,23 @@ class ControlIfElseInvertModifier(CppProceduralModifier):
         else_body = None
 
         for i, child in enumerate(target.children):
-            if child.type == "parenthesized_expression":
+            # Handle condition_clause (contains the condition expression)
+            if child.type == "condition_clause":
                 condition = code[child.start_byte : child.end_byte]
             elif child.type == "compound_statement" and if_body is None:
                 if_body = code[child.start_byte : child.end_byte]
-            elif child.type == "else":
-                # Next sibling should be the else body
-                if i + 1 < len(target.children):
-                    else_node = target.children[i + 1]
-                    if else_node.type == "compound_statement":
-                        else_body = code[else_node.start_byte : else_node.end_byte]
-                    elif else_node.type == "if_statement":
+            elif child.type == "else_clause":
+                # else_clause contains the else body
+                for subchild in child.children:
+                    if subchild.type == "compound_statement":
+                        else_body = code[subchild.start_byte : subchild.end_byte]
+                        break
+                    elif subchild.type == "if_statement":
                         # Handle else-if: extract the if body as else body
-                        for subchild in else_node.children:
-                            if subchild.type == "compound_statement":
+                        for subsubchild in subchild.children:
+                            if subsubchild.type == "compound_statement":
                                 else_body = code[
-                                    subchild.start_byte : subchild.end_byte
+                                    subsubchild.start_byte : subsubchild.end_byte
                                 ]
                                 break
 
@@ -95,8 +96,8 @@ class ControlIfElseInvertModifier(CppProceduralModifier):
             # Check if it has an else branch (including else-if)
             has_else = False
 
-            for i, child in enumerate(node.children):
-                if child.type == "else":
+            for child in node.children:
+                if child.type == "else_clause":
                     has_else = True
                     break
 
@@ -113,7 +114,7 @@ class ControlIfElseInvertModifier(CppProceduralModifier):
             # Check if it has an else branch
             has_else = False
             for child in node.children:
-                if child.type == "else":
+                if child.type == "else_clause":
                     has_else = True
                     break
 
