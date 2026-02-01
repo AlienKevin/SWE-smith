@@ -1614,7 +1614,7 @@ def print_summary(results: list[dict], repos_count: int):
         repo_stats[repo]["total"] += 1
         if r.get("valid"):
             repo_stats[repo]["valid"] += 1
-        if "error" in r:
+        if r.get("error"):
             repo_stats[repo]["errors"] += 1
 
     print("\nPer-repo breakdown:")
