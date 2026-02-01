@@ -1018,7 +1018,7 @@ async def run_generation_phase(repos: list[str], args, language: str) -> list[di
         completed = 0
         total_bugs = 0
 
-        for result_or_exc in generate_bugs_remote.map(
+        async for result_or_exc in generate_bugs_remote.map.aio(
             repo_names,
             kwargs={
                 "max_bugs": args.max_bugs,
