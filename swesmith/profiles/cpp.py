@@ -134,6 +134,14 @@ class Spdlog8806ca65(CppProfile):
     timeout: int = 300
     org_dh: str = "zhehaoli1999"  # Docker Hub username
     org_gh: str = "zhehaoli1999"  # GitHub username (for personal account)
+    # Exclude bundled fmt library - spdlog's tests don't cover fmt internals,
+    # causing ~70% of bugs in bundled/fmt to pass tests (only 3.2% validation rate)
+    bug_gen_dirs_exclude: list[str] = field(
+        default_factory=lambda: [
+            *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
+            "/include/spdlog/fmt/bundled",
+        ]
+    )
 
     @property
     def dockerfile(self):
