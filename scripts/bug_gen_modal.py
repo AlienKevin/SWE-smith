@@ -1028,6 +1028,8 @@ async def run_generation_phase(repos: list[str], args, language: str) -> list[di
                 "language": language,  # Workers save directly to Volume
             },
             return_exceptions=True,
+            # Future-proof against Modal's deprecation warning.
+            wrap_returned_exceptions=False,
         ):
             completed += 1
 
