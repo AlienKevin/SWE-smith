@@ -42,9 +42,11 @@ def test_remove_loop_modifier(tmp_path, src):
     assert result is not None
     assert result.rewrite != src, "Expected result to differ from source"
     # The loop structure should be removed or simplified
-    assert "for" not in result.rewrite or "while" not in result.rewrite or "do" not in result.rewrite, (
-        f"Expected loop keywords to be removed or reduced: {result.rewrite}"
-    )
+    assert (
+        "for" not in result.rewrite
+        or "while" not in result.rewrite
+        or "do" not in result.rewrite
+    ), f"Expected loop keywords to be removed or reduced: {result.rewrite}"
 
 
 def test_remove_loop_modifier_extracts_body(tmp_path):
@@ -66,7 +68,9 @@ def test_remove_loop_modifier_extracts_body(tmp_path):
 
     assert result is not None
     # The body content should be extracted
-    assert "int x = 5" in result.rewrite, f"Expected loop body to be extracted: {result.rewrite}"
+    assert "int x = 5" in result.rewrite, (
+        f"Expected loop body to be extracted: {result.rewrite}"
+    )
 
 
 def test_remove_loop_modifier_no_loops(tmp_path):
@@ -139,7 +143,9 @@ def test_remove_conditional_modifier_extracts_body(tmp_path):
 
     assert result is not None
     # The body content should be extracted (if structure removed)
-    assert "doWork()" in result.rewrite, f"Expected if body to be extracted: {result.rewrite}"
+    assert "doWork()" in result.rewrite, (
+        f"Expected if body to be extracted: {result.rewrite}"
+    )
 
 
 def test_remove_conditional_modifier_no_conditionals(tmp_path):
@@ -209,8 +215,8 @@ def test_remove_assign_modifier_removes_statement(tmp_path):
 
     assert result is not None
     # One of the assignments should be removed
-    lines_with_assignment = [line for line in result.rewrite.split('\n') if '=' in line]
-    original_lines_with_assignment = [line for line in src.split('\n') if '=' in line]
+    lines_with_assignment = [line for line in result.rewrite.split("\n") if "=" in line]
+    original_lines_with_assignment = [line for line in src.split("\n") if "=" in line]
     assert len(lines_with_assignment) < len(original_lines_with_assignment), (
         f"Expected fewer assignments: {result.rewrite}"
     )

@@ -27,7 +27,10 @@ class CppProfile(RepoProfile):
     """
     Profile for C++ repositories.
     """
-    exts: list[str] = field(default_factory=lambda: [".cpp", ".cc", ".cxx", ".h", ".hpp"])
+
+    exts: list[str] = field(
+        default_factory=lambda: [".cpp", ".cc", ".cxx", ".h", ".hpp"]
+    )
     # Exclude directories that are typically not built/executed by unit tests.
     bug_gen_dirs_exclude: list[str] = field(
         default_factory=lambda: list(DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE)
@@ -56,15 +59,17 @@ class Catch29b3f508a(CppProfile):
     owner: str = "catchorg"
     repo: str = "Catch2"
     commit: str = "9b3f508a1b1579f5366cf83d19822cb395f23528"
-    test_cmd: str = "cd build && cmake --build . -j$(nproc) && ctest --output-on-failure --verbose"
+    test_cmd: str = (
+        "cd build && cmake --build . -j$(nproc) && ctest --output-on-failure --verbose"
+    )
     timeout: int = 300  # 5 minutes - allows time for incremental rebuild + 71 tests
     # Exclude directories not used in cmake build or not covered by tests
     bug_gen_dirs_exclude: list[str] = field(
         default_factory=lambda: [
             *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
-            "/extras",       # Amalgamated single-file version (not used in cmake build)
+            "/extras",  # Amalgamated single-file version (not used in cmake build)
             "/third_party",  # Bundled third-party libraries (not tested)
-            "/fuzzing",      # Fuzzing harness code (not library code)
+            "/fuzzing",  # Fuzzing harness code (not library code)
         ]
     )
 
@@ -132,7 +137,9 @@ class Spdlog8806ca65(CppProfile):
     owner: str = "gabime"
     repo: str = "spdlog"
     commit: str = "8806ca6509f037cf7612ea292338e3b222209dc1"
-    test_cmd: str = "cd build && cmake --build . -j$(nproc) && ctest --output-on-failure --verbose"
+    test_cmd: str = (
+        "cd build && cmake --build . -j$(nproc) && ctest --output-on-failure --verbose"
+    )
     timeout: int = 300
     org_dh: str = "zhehaoli1999"  # Docker Hub username
     org_gh: str = "zhehaoli1999"  # GitHub username (for personal account)

@@ -85,10 +85,14 @@ def test_control_if_else_invert_bare_if(tmp_path):
         result = modifier.modify(entities[0])
         if result is not None:
             # Should convert to: if (x > 0) {} else { return 1; }
-            assert "else" in result.rewrite, f"Expected 'else' in result: {result.rewrite}"
+            assert "else" in result.rewrite, (
+                f"Expected 'else' in result: {result.rewrite}"
+            )
             break
 
-    assert result is not None, "Expected modifier to produce a result for bare if statement"
+    assert result is not None, (
+        "Expected modifier to produce a result for bare if statement"
+    )
 
 
 def test_control_shuffle_lines_modifier(tmp_path):

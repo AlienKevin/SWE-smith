@@ -66,7 +66,7 @@ class CPlusPlusEntity(CodeEntity):
 
             if node.type == "assignment_expression":
                 self._tags.add(CodeProperty.HAS_ASSIGNMENT)
-            
+
             if node.type == "init_declarator":
                 for child in node.children:
                     if child.type == "=":
