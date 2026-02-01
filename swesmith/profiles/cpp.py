@@ -399,7 +399,7 @@ for name, obj in list(globals().items()):
     ):
         # NOTE: Catch29b3f508a is not uploaded to zhehaoli1999's Docker Hub yet.
         # Skip it for now to avoid failed pulls during Modal validation.
-        # eigen is problematic with bug validation
+        # Skipping eigen as it times out during pre-gold (over 500s)
         if obj.__name__ in ["Catch29b3f508a", "Eigen9b00db8c"]:
             continue
         registry.register_profile(obj)
