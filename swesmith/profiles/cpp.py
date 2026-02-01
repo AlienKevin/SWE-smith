@@ -251,7 +251,7 @@ class Eigen9b00db8c(CppProfile):
         print(f"[DEBUG] Repo name: {self.repo_name}")
         print(f"[DEBUG] Org GH: {self.org_gh}")
 
-        return f"""FROM gcc:12
+        return """FROM gcc:12
 RUN apt-get update && apt-get install -y \
     git clang build-essential cmake \
     python3 python3-dev python3-pip
@@ -262,14 +262,13 @@ RUN git clone https://gitlab.com/libeigen/eigen.git /testbed \
     && git checkout 9b00db8cb9154477b93b342cf418b5da5d7f58a0
 WORKDIR /testbed
 
-
-# Build and test spdlog
+# Build and test Eigen
 RUN mkdir build && cd build \
     && cmake .. -DBUILD_TESTING=ON \
     && cmake --build . -j$(nproc)
-    
+
 RUN cd build && ctest --output-on-failure --continue-on-failure --timeout 36000 --verbose || true
-    """
+"""
 
     def log_parser(self, log: str) -> dict[str, str]:
         test_status_map = {}
