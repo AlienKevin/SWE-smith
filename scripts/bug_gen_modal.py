@@ -143,7 +143,7 @@ LANGUAGE_TO_BASE_CLASS = {
 
 TEST_OUTPUT_START = ">>>>> Start Test Output"
 TEST_OUTPUT_END = ">>>>> End Test Output"
-PREGOLD_TIMEOUT = 200  # seconds - skip post-gold if baseline exceeds this
+PREGOLD_TIMEOUT = 500  # seconds - skip post-gold if baseline exceeds this
 MIN_PATCHES_FOR_VALIDATION = 50  # skip repos with fewer patches
 
 REMOTE_VALIDATOR_SCRIPT = r"""
