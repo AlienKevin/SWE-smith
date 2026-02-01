@@ -27,12 +27,6 @@ class CppProfile(RepoProfile):
     """
     Profile for C++ repositories.
     """
-
-    # Use personal Docker Hub for C++ testing.
-    org_dh: str = "zhehaoli1999"
-    # C++ images are currently published as x86_64 only.
-    arch: str = "x86_64"
-    pltf: str = "linux/x86_64"
     exts: list[str] = field(default_factory=lambda: [".cpp", ".cc", ".cxx", ".h", ".hpp"])
     # Exclude directories that are typically not built/executed by unit tests.
     bug_gen_dirs_exclude: list[str] = field(
@@ -63,8 +57,6 @@ class Catch29b3f508a(CppProfile):
     repo: str = "Catch2"
     commit: str = "9b3f508a1b1579f5366cf83d19822cb395f23528"
     test_cmd: str = "cd build && ctest"
-    org_dh: str = "jyangballin"  # Docker Hub username
-    org_gh: str = "jyangballin"  # GitHub username (for personal account)
 
     @property
     def dockerfile(self):
