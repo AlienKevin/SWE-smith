@@ -10,11 +10,14 @@ respective subdirectories (e.g., python/, javascript/, java/).
 from swesmith.bug_gen.procedural.golang import MODIFIERS_GOLANG
 from swesmith.bug_gen.procedural.python import MODIFIERS_PYTHON
 from swesmith.bug_gen.procedural.javascript import MODIFIERS_JAVASCRIPT
+from swesmith.bug_gen.procedural.typescript import MODIFIERS_TYPESCRIPT
 from swesmith.bug_gen.procedural.rust import MODIFIERS_RUST
 
 MAP_EXT_TO_MODIFIERS = {
     ".go": MODIFIERS_GOLANG,
     ".py": MODIFIERS_PYTHON,
     ".js": MODIFIERS_JAVASCRIPT,
+    ".ts": MODIFIERS_TYPESCRIPT,
+    ".tsx": MODIFIERS_TYPESCRIPT,
     ".rs": MODIFIERS_RUST,
 }

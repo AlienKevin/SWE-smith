@@ -14,6 +14,7 @@ from . import csharp
 from . import java
 from . import javascript
 from . import php
+from . import typescript
 from . import python
 from . import golang
 from . import rust
