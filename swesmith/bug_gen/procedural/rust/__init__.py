@@ -17,14 +17,14 @@ from swesmith.bug_gen.procedural.rust.remove import (
 )
 
 MODIFIERS_RUST: list[ProceduralModifier] = [
-    ControlIfElseInvertModifier(likelihood=0.25),
-    ControlShuffleLinesModifier(likelihood=0.25),
-    RemoveAssignModifier(likelihood=0.25),
-    RemoveConditionalModifier(likelihood=0.25),
-    RemoveLoopModifier(likelihood=0.25),
-    OperationBreakChainsModifier(likelihood=0.25),
-    OperationChangeConstantsModifier(likelihood=0.25),
-    OperationChangeModifier(likelihood=0.25),
-    OperationFlipOperatorModifier(likelihood=0.25),
-    OperationSwapOperandsModifier(likelihood=0.25),
+    ControlIfElseInvertModifier(likelihood=0.5),
+    ControlShuffleLinesModifier(likelihood=0.5),
+    RemoveAssignModifier(likelihood=0.5),
+    RemoveConditionalModifier(likelihood=0.5),
+    RemoveLoopModifier(likelihood=0.5),
+    OperationBreakChainsModifier(likelihood=0.5),
+    OperationChangeConstantsModifier(likelihood=0.5),
+    OperationChangeModifier(likelihood=0.5),
+    OperationFlipOperatorModifier(likelihood=0.5),
+    OperationSwapOperandsModifier(likelihood=0.5),
 ]
