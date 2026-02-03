@@ -143,7 +143,7 @@ LANGUAGE_TO_BASE_CLASS = {
 
 TEST_OUTPUT_START = ">>>>> Start Test Output"
 TEST_OUTPUT_END = ">>>>> End Test Output"
-PREGOLD_TIMEOUT = 500  # seconds - skip post-gold if baseline exceeds this
+PREGOLD_TIMEOUT = 200  # seconds - skip post-gold if baseline exceeds this
 MIN_PATCHES_FOR_VALIDATION = 50  # skip repos with fewer patches
 
 REMOTE_VALIDATOR_SCRIPT = r"""
@@ -275,15 +275,12 @@ def resolve_profile(repo_name: str):
     from swesmith.profiles import registry
 
     try:
-        profile = registry.get(repo_name)
-        profile.arch = "x86_64"
-        return profile
+        return registry.get(repo_name)
     except KeyError:
         for key in registry.keys():
             try:
                 p = registry.get(key)
                 if f"{p.owner}/{p.repo}" == repo_name:
-                    p.arch = "x86_64"
                     return p
             except Exception:
                 continue
@@ -1021,7 +1018,7 @@ async def run_generation_phase(repos: list[str], args, language: str) -> list[di
         completed = 0
         total_bugs = 0
 
-        async for result_or_exc in generate_bugs_remote.map.aio(
+        for result_or_exc in generate_bugs_remote.map(
             repo_names,
             kwargs={
                 "max_bugs": args.max_bugs,
@@ -1031,8 +1028,6 @@ async def run_generation_phase(repos: list[str], args, language: str) -> list[di
                 "language": language,  # Workers save directly to Volume
             },
             return_exceptions=True,
-            # Future-proof against Modal's deprecation warning.
-            wrap_returned_exceptions=False,
         ):
             completed += 1
 
@@ -1617,7 +1612,7 @@ def print_summary(results: list[dict], repos_count: int):
         repo_stats[repo]["total"] += 1
         if r.get("valid"):
             repo_stats[repo]["valid"] += 1
-        if r.get("error"):
+        if "error" in r:
             repo_stats[repo]["errors"] += 1
 
     print("\nPer-repo breakdown:")
