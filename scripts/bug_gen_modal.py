@@ -126,6 +126,7 @@ VOLUME_NAME = "swesmith-bug-gen"
 MINUTES = 60
 MODAL_TIMEOUT = 10 * MINUTES
 SANDBOX_RATE_LIMIT = 4  # Modal limits to 5/s, use 4 to be safe
+VALIDATION_SANDBOX_MEMORY_MIB = 8 * 1024  # OOM mitigation for repo validation sandboxes
 
 LANGUAGE_TO_BASE_CLASS = {
     "python": "PythonProfile",
@@ -771,6 +772,7 @@ async def run_validation_in_sandbox(
             "app": app,
             "image": validator_image,
             "timeout": timeout,
+            "memory": VALIDATION_SANDBOX_MEMORY_MIB,  # Memory request in MiB
         }
 
         if postgold_config:
