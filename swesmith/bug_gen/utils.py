@@ -55,7 +55,9 @@ def apply_code_change(candidate: CodeEntity, bug: BugRewrite) -> None:
         )
 
 
-def generate_patch_fast(candidate: CodeEntity, bug: BugRewrite, repo: str) -> str | None:
+def generate_patch_fast(
+    candidate: CodeEntity, bug: BugRewrite, repo: str
+) -> str | None:
     """
     Generate a patch for a bug rewrite using difflib (no git subprocess calls).
 
