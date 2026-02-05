@@ -11,6 +11,7 @@ from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
+from swesmith.constants import Architecture
 from swesmith.profiles import registry
 
 
@@ -36,7 +37,12 @@ def build_profile_image(profile, push=False):
 
 
 def build_all_images(
-    workers=4, repo_filter=None, proceed=False, push=False, force=False
+    workers=4,
+    repo_filter=None,
+    proceed=False,
+    push=False,
+    force=False,
+    arch=None,
 ):
     """
     Build Docker images for all registered profiles in parallel.
@@ -46,12 +52,20 @@ def build_all_images(
         repo_filter: Optional list of repository name patterns to filter by (fuzzy matching)
         proceed: Whether to proceed without confirmation
         force: Force rebuild even if image already exists
+        arch: Architecture to build for (e.g. "x86_64", "arm64")
 
     Returns:
         tuple: (successful_builds, failed_builds)
     """
     # Get all available profiles
     all_profiles = registry.values()
+
+    # Update profile architecture if specified
+    if arch:
+        target_arch = arch
+        print(f"Forcing build for architecture: {target_arch}")
+        for profile in all_profiles:
+            profile.arch = target_arch
 
     # Remove environments that have already been built
     client = docker.from_env()
@@ -175,6 +189,11 @@ def main():
     parser.add_argument(
         "--list-envs", action="store_true", help="List all available profiles and exit"
     )
+    parser.add_argument(
+        "--arch",
+        choices=[a.value for a in Architecture],
+        help="Force build for specific architecture",
+    )
 
     args = parser.parse_args()
 
@@ -190,6 +209,7 @@ def main():
         proceed=args.proceed,
         push=args.push,
         force=args.force,
+        arch=args.arch,
     )
 
     if failed:
