@@ -43,9 +43,9 @@ def test_boolean_negate_modifier(tmp_path, src, expected_changes):
     result = modifier.modify(entities[0])
 
     assert result is not None
-    assert any(
-        change in result.rewrite for change in expected_changes
-    ), f"Expected one of {expected_changes} in:\n{result.rewrite}"
+    assert any(change in result.rewrite for change in expected_changes), (
+        f"Expected one of {expected_changes} in:\n{result.rewrite}"
+    )
 
 
 def test_boolean_negate_no_boolean(tmp_path):

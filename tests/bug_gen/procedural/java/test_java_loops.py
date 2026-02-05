@@ -46,9 +46,7 @@ def test_loop_break_continue_swap_modifier(tmp_path, src, expected_swap):
 
     assert result is not None
     original, swapped = expected_swap
-    assert swapped in result.rewrite, (
-        f"Expected {original} to be swapped to {swapped}"
-    )
+    assert swapped in result.rewrite, f"Expected {original} to be swapped to {swapped}"
 
 
 def test_loop_break_continue_swap_no_break_continue(tmp_path):
@@ -116,9 +114,9 @@ def test_loop_off_by_one_modifier(tmp_path, src, original_op, expected_ops):
     result = modifier.modify(entities[0])
 
     assert result is not None
-    assert any(
-        op in result.rewrite for op in expected_ops
-    ), f"Expected one of {expected_ops} in result"
+    assert any(op in result.rewrite for op in expected_ops), (
+        f"Expected one of {expected_ops} in result"
+    )
 
 
 def test_loop_off_by_one_no_loop(tmp_path):

@@ -49,9 +49,9 @@ def test_operation_change_modifier(tmp_path, src, possible_results):
     result = modifier.modify(entities[0])
 
     assert result is not None
-    assert any(
-        expected in result.rewrite for expected in possible_results
-    ), f"Expected one of {possible_results} in {result.rewrite}"
+    assert any(expected in result.rewrite for expected in possible_results), (
+        f"Expected one of {possible_results} in {result.rewrite}"
+    )
 
 
 @pytest.mark.parametrize(
