@@ -149,7 +149,7 @@ class ControlShuffleLinesModifier(CppProceduralModifier):
         original_order = stmt_texts.copy()
         self.rand.shuffle(stmt_texts)
 
-        # If nothing changed, try again or return original
+        # If shuffle produced the same order, return original unchanged
         if stmt_texts == original_order:
             return code
 
@@ -164,14 +164,12 @@ class ControlShuffleLinesModifier(CppProceduralModifier):
 
         indent = code[indent_start : first_stmt.start_byte]
 
-        # Build new block content
+        # Build new block content with original indentation
         new_block = "\n".join(indent + stmt for stmt in stmt_texts)
 
-        return (
-            code[:indent_start] + new_block + "\n" + indent[:-4]
-            if len(indent) >= 4
-            else indent
-        ) + code[last_stmt.end_byte :]
+        # Replace statements region, preserving the rest of the code
+        # (including newline and closing brace after last statement)
+        return code[:indent_start] + new_block + code[last_stmt.end_byte :]
 
     def _find_blocks(self, node, candidates):
         """Find blocks with multiple statements."""
