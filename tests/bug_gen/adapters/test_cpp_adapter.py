@@ -1,6 +1,5 @@
 """Tests for the C++ adapter's tag analysis and complexity calculation."""
 
-import pytest
 from swesmith.bug_gen.adapters.cpp import get_entities_from_file_cpp
 from swesmith.constants import CodeProperty
 
