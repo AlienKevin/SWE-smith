@@ -7,7 +7,6 @@ import random
 import tree_sitter_java as tsjava
 from tree_sitter import Language, Parser
 
-from swesmith.bug_gen.procedural.base import CommonPMProp
 from swesmith.bug_gen.procedural.java.base import JavaProceduralModifier
 from swesmith.constants import BugRewrite, CodeEntity
 
