@@ -134,7 +134,10 @@ class TestCPlusPlusEntityTags:
         ]
 
         for op, src in test_cases:
-            test_file = tmp_path / f"test_{op.replace('<', 'lt').replace('>', 'gt').replace('=', 'eq')}.cpp"
+            test_file = (
+                tmp_path
+                / f"test_{op.replace('<', 'lt').replace('>', 'gt').replace('=', 'eq')}.cpp"
+            )
             test_file.write_text(src, encoding="utf-8")
 
             entities = []

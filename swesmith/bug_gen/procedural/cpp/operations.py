@@ -85,7 +85,9 @@ class OperationChangeModifier(CppProceduralModifier):
         replacement = None
         if operator_text in AGGRESSIVE_ARITHMETIC_TRANSFORMS:
             # Use aggressive arithmetic transformations (more likely to break)
-            replacement = self.rand.choice(AGGRESSIVE_ARITHMETIC_TRANSFORMS[operator_text])
+            replacement = self.rand.choice(
+                AGGRESSIVE_ARITHMETIC_TRANSFORMS[operator_text]
+            )
         elif operator_text in ARITHMETIC_OPS:
             # Fallback: use opposite operations (e.g., + -> -, * -> /)
             if operator_text == "+":
