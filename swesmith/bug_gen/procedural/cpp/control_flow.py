@@ -2,7 +2,6 @@
 Control flow-related procedural modifications for C++ code.
 """
 
-import random
 
 import tree_sitter_cpp as tscpp
 from tree_sitter import Language, Parser
@@ -42,16 +41,14 @@ class ControlIfElseInvertModifier(CppProceduralModifier):
         )
 
     def _invert_if_else_statements(self, code: str, node) -> str:
-        """Invert if-else statements (including else-if chains)."""
+        """Invert if-else statements (including else-if chains and bare if statements)."""
         candidates = []
-        self._find_if_else_statements(node, candidates)
-        # Also find if statements without else (we can add else with empty body)
-        self._find_if_statements(node, candidates)
+        self._find_all_if_statements(node, candidates)
 
         if not candidates:
             return code
 
-        target = random.choice(candidates)
+        target = self.rand.choice(candidates)
 
         # Extract components
         condition = None
@@ -90,40 +87,13 @@ class ControlIfElseInvertModifier(CppProceduralModifier):
 
         return code
 
-    def _find_if_else_statements(self, node, candidates):
-        """Find if-else statements (including else-if chains)."""
+    def _find_all_if_statements(self, node, candidates):
+        """Find all if statements (with or without else clauses)."""
         if node.type == "if_statement":
-            # Check if it has an else branch (including else-if)
-            has_else = False
-
-            for child in node.children:
-                if child.type == "else_clause":
-                    has_else = True
-                    break
-
-            # Accept both simple if-else and else-if chains
-            if has_else:
-                candidates.append(node)
+            candidates.append(node)
 
         for child in node.children:
-            self._find_if_else_statements(child, candidates)
-
-    def _find_if_statements(self, node, candidates):
-        """Find if statements without else (to add else with empty body)."""
-        if node.type == "if_statement":
-            # Check if it has an else branch
-            has_else = False
-            for child in node.children:
-                if child.type == "else_clause":
-                    has_else = True
-                    break
-
-            # Only add if statements without else
-            if not has_else:
-                candidates.append(node)
-
-        for child in node.children:
-            self._find_if_statements(child, candidates)
+            self._find_all_if_statements(child, candidates)
 
 
 class ControlShuffleLinesModifier(CppProceduralModifier):
@@ -158,7 +128,7 @@ class ControlShuffleLinesModifier(CppProceduralModifier):
         if not candidates:
             return code
 
-        target = random.choice(candidates)
+        target = self.rand.choice(candidates)
         statements = [
             child
             for child in target.children
@@ -178,7 +148,7 @@ class ControlShuffleLinesModifier(CppProceduralModifier):
 
         # Shuffle
         original_order = stmt_texts.copy()
-        random.shuffle(stmt_texts)
+        self.rand.shuffle(stmt_texts)
 
         # If nothing changed, try again or return original
         if stmt_texts == original_order:

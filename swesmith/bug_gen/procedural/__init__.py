@@ -14,13 +14,13 @@ from swesmith.bug_gen.procedural.python import MODIFIERS_PYTHON
 from swesmith.bug_gen.procedural.rust import MODIFIERS_RUST
 
 MAP_EXT_TO_MODIFIERS = {
-    ".go": MODIFIERS_GOLANG,
-    ".py": MODIFIERS_PYTHON,
-    ".js": MODIFIERS_JAVASCRIPT,
-    ".rs": MODIFIERS_RUST,
-    ".cpp": MODIFIERS_CPP,
     ".cc": MODIFIERS_CPP,
+    ".cpp": MODIFIERS_CPP,
     ".cxx": MODIFIERS_CPP,
-    ".hpp": MODIFIERS_CPP,
+    ".go": MODIFIERS_GOLANG,
     ".h": MODIFIERS_CPP,
+    ".hpp": MODIFIERS_CPP,
+    ".js": MODIFIERS_JAVASCRIPT,
+    ".py": MODIFIERS_PYTHON,
+    ".rs": MODIFIERS_RUST,
 }

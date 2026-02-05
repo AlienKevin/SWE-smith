@@ -2,8 +2,6 @@
 Operation-related procedural modifications for C++ code.
 """
 
-import random
-
 import tree_sitter_cpp as tscpp
 from tree_sitter import Language, Parser
 
@@ -80,14 +78,14 @@ class OperationChangeModifier(CppProceduralModifier):
             return code
 
         # Select a random operation to change
-        target = random.choice(candidates)
+        target = self.rand.choice(candidates)
         operator_text = code[target.start_byte : target.end_byte]
 
         # Choose a replacement with aggressive transformations
         replacement = None
         if operator_text in AGGRESSIVE_ARITHMETIC_TRANSFORMS:
             # Use aggressive arithmetic transformations (more likely to break)
-            replacement = random.choice(AGGRESSIVE_ARITHMETIC_TRANSFORMS[operator_text])
+            replacement = self.rand.choice(AGGRESSIVE_ARITHMETIC_TRANSFORMS[operator_text])
         elif operator_text in ARITHMETIC_OPS:
             # Fallback: use opposite operations (e.g., + -> -, * -> /)
             if operator_text == "+":
@@ -107,13 +105,13 @@ class OperationChangeModifier(CppProceduralModifier):
             else:
                 # Fallback: random from same category
                 ops = list(COMPARISON_OPS - {operator_text})
-                replacement = random.choice(ops) if ops else None
+                replacement = self.rand.choice(ops) if ops else None
         elif operator_text in LOGICAL_OPS:
             # For logical ops, always flip (&& <-> ||)
             replacement = FLIPPED_OPERATORS.get(operator_text)
             if not replacement:
                 ops = list(LOGICAL_OPS - {operator_text})
-                replacement = random.choice(ops) if ops else None
+                replacement = self.rand.choice(ops) if ops else None
 
         if replacement:
             return code[: target.start_byte] + replacement + code[target.end_byte :]
@@ -179,7 +177,7 @@ class OperationFlipOperatorModifier(CppProceduralModifier):
         if not candidates:
             return code
 
-        target = random.choice(candidates)
+        target = self.rand.choice(candidates)
         operator_text = code[target.start_byte : target.end_byte]
 
         if operator_text in FLIPPED_OPERATORS:
@@ -237,7 +235,7 @@ class OperationSwapOperandsModifier(CppProceduralModifier):
         if not candidates:
             return code
 
-        target = random.choice(candidates)
+        target = self.rand.choice(candidates)
         if len(target.children) >= 3:
             left = target.children[0]
             right = target.children[2]
@@ -302,7 +300,7 @@ class OperationChangeConstantsModifier(CppProceduralModifier):
         if not candidates:
             return code
 
-        target = random.choice(candidates)
+        target = self.rand.choice(candidates)
         original = code[target.start_byte : target.end_byte]
 
         try:
@@ -321,7 +319,7 @@ class OperationChangeConstantsModifier(CppProceduralModifier):
                     -1.0,
                     value * -1,  # Negate
                 ]
-                new_value = random.choice(transformations)
+                new_value = self.rand.choice(transformations)
             else:
                 value = int(original, 0)  # Handles hex, octal, etc.
                 # Aggressive changes: multiply/divide by large factors, or change to 0/1/-1
@@ -338,7 +336,7 @@ class OperationChangeConstantsModifier(CppProceduralModifier):
                     value * -1,  # Negate
                     abs(value) + 1,  # Always positive + 1
                 ]
-                new_value = random.choice(transformations)
+                new_value = self.rand.choice(transformations)
                 # Ensure we don't create invalid values
                 if (
                     new_value < 0
@@ -402,7 +400,7 @@ class OperationBreakChainsModifier(CppProceduralModifier):
         if not candidates:
             return code
 
-        target = random.choice(candidates)
+        target = self.rand.choice(candidates)
         # Remove one function call from the chain
         # In C++ tree-sitter, call_expression structure: [callee, arguments]
         if len(target.children) >= 1:

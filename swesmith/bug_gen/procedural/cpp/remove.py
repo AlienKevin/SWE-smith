@@ -2,8 +2,6 @@
 Removal-related procedural modifications for C++ code.
 """
 
-import random
-
 import tree_sitter_cpp as tscpp
 from tree_sitter import Language, Parser
 
@@ -46,7 +44,7 @@ class RemoveLoopModifier(CppProceduralModifier):
         if not candidates:
             return code
 
-        target = random.choice(candidates)
+        target = self.rand.choice(candidates)
 
         # Find the loop body
         body = None
@@ -109,7 +107,7 @@ class RemoveConditionalModifier(CppProceduralModifier):
         if not candidates:
             return code
 
-        target = random.choice(candidates)
+        target = self.rand.choice(candidates)
 
         # Find the if body
         body = None
@@ -166,7 +164,7 @@ class RemoveAssignModifier(CppProceduralModifier):
         if not candidates:
             return code
 
-        target = random.choice(candidates)
+        target = self.rand.choice(candidates)
 
         # Find the statement containing this assignment
         stmt = target

@@ -2,7 +2,6 @@
 String-related procedural modifications for C++ code.
 """
 
-import random
 import string
 
 import tree_sitter_cpp as tscpp
@@ -48,7 +47,7 @@ class ReplaceStringTypoModifier(CppProceduralModifier):
         if not candidates:
             return code
 
-        target = random.choice(candidates)
+        target = self.rand.choice(candidates)
         original_string = code[target.start_byte : target.end_byte]
 
         # Extract the string content (remove quotes)
@@ -94,12 +93,12 @@ class ReplaceStringTypoModifier(CppProceduralModifier):
             return content
 
         # Choose a random position
-        pos = random.randint(0, len(content) - 1)
+        pos = self.rand.randint(0, len(content) - 1)
         char = content[pos]
 
         # Introduce typo: change one character
         # Options: swap adjacent, change to similar character, or random change
-        typo_choice = random.choice(["adjacent", "similar", "random"])
+        typo_choice = self.rand.choice(["adjacent", "similar", "random"])
 
         if typo_choice == "adjacent" and len(content) > 1:
             # Swap with adjacent character (common typo)
@@ -119,7 +118,7 @@ class ReplaceStringTypoModifier(CppProceduralModifier):
                     # Use QWERTY keyboard layout adjacent keys
                     adjacent_chars = self._get_qwerty_adjacent(char.lower())
                     if adjacent_chars:
-                        new_char = random.choice(adjacent_chars)
+                        new_char = self.rand.choice(adjacent_chars)
                         if char.isupper():
                             new_char = new_char.upper()
                         return content[:pos] + new_char + content[pos + 1 :]
@@ -135,7 +134,7 @@ class ReplaceStringTypoModifier(CppProceduralModifier):
         # Random change (fallback or explicit choice)
         while True:
             # Choose a random printable ASCII character
-            new_char = random.choice(string.printable)
+            new_char = self.rand.choice(string.printable)
             if new_char != char and new_char not in "\n\r\t":
                 break
         return content[:pos] + new_char + content[pos + 1 :]
