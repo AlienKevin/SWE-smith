@@ -21,6 +21,10 @@ FLIPPED_OPERATORS = {
     ">=": "<",
     "&&": "||",
     "||": "&&",
+    "&": "|",
+    "|": "&",
+    "<<": ">>",
+    ">>": "<<",
 }
 
 # Aggressive operator transformations that are more likely to break tests
@@ -43,6 +47,8 @@ AGGRESSIVE_ARITHMETIC_TRANSFORMS = {
 ARITHMETIC_OPS = {"+", "-", "*", "/", "%"}
 COMPARISON_OPS = {"<", ">", "<=", ">=", "==", "!="}
 LOGICAL_OPS = {"&&", "||"}
+BITWISE_OPS = {"&", "|", "^", "<<", ">>"}
+SUPPORTED_BINARY_OPERATORS = ARITHMETIC_OPS | COMPARISON_OPS | LOGICAL_OPS | BITWISE_OPS
 
 
 class OperationChangeModifier(CppProceduralModifier):
@@ -88,32 +94,10 @@ class OperationChangeModifier(CppProceduralModifier):
             replacement = self.rand.choice(
                 AGGRESSIVE_ARITHMETIC_TRANSFORMS[operator_text]
             )
-        elif operator_text in ARITHMETIC_OPS:
-            # Fallback: use opposite operations (e.g., + -> -, * -> /)
-            if operator_text == "+":
-                replacement = "-"
-            elif operator_text == "-":
-                replacement = "+"
-            elif operator_text == "*":
-                replacement = "/"  # Division can cause division by zero
-            elif operator_text == "/":
-                replacement = "*"  # Multiplication can cause overflow
-            elif operator_text == "%":
-                replacement = "/"  # Modulo -> division
-        elif operator_text in COMPARISON_OPS:
-            # For comparisons, prefer flipping to opposite (more likely to break)
-            if operator_text in FLIPPED_OPERATORS:
-                replacement = FLIPPED_OPERATORS[operator_text]
-            else:
-                # Fallback: random from same category
-                ops = list(COMPARISON_OPS - {operator_text})
-                replacement = self.rand.choice(ops) if ops else None
-        elif operator_text in LOGICAL_OPS:
-            # For logical ops, always flip (&& <-> ||)
-            replacement = FLIPPED_OPERATORS.get(operator_text)
-            if not replacement:
-                ops = list(LOGICAL_OPS - {operator_text})
-                replacement = self.rand.choice(ops) if ops else None
+        elif operator_text in FLIPPED_OPERATORS:
+            replacement = FLIPPED_OPERATORS[operator_text]
+        elif operator_text in BITWISE_OPS:
+            replacement = self.rand.choice(list(BITWISE_OPS - {operator_text}))
 
         if replacement:
             return code[: target.start_byte] + replacement + code[target.end_byte :]
@@ -125,30 +109,16 @@ class OperationChangeModifier(CppProceduralModifier):
         if node.type == "binary_expression":
             # In C++ tree-sitter, the operator is typically the 2nd child (after first operand)
             # We need to find the operator token
-            for i, child in enumerate(node.children):
+            for child in node.children:
                 # Check if this is an operator by looking for patterns
-                if child.type in [
-                    "+",
-                    "-",
-                    "*",
-                    "/",
-                    "%",
-                    "<",
-                    ">",
-                    "<=",
-                    ">=",
-                    "==",
-                    "!=",
-                    "&&",
-                    "||",
-                ]:
+                if child.type in SUPPORTED_BINARY_OPERATORS:
                     candidates.append(child)
         for child in node.children:
             self._find_operations(child, candidates)
 
 
 class OperationFlipOperatorModifier(CppProceduralModifier):
-    """Flip comparison and logical operators."""
+    """Flip comparison, logical, and selected bitwise operators."""
 
     explanation: str = CommonPMs.OPERATION_FLIP_OPERATOR.explanation
     name: str = CommonPMs.OPERATION_FLIP_OPERATOR.name
@@ -172,7 +142,7 @@ class OperationFlipOperatorModifier(CppProceduralModifier):
         )
 
     def _flip_operators(self, code: str, node) -> str:
-        """Flip comparison/logical operators."""
+        """Flip operators that have a mapped opposite."""
         candidates = []
         self._find_flippable_operators(node, candidates)
 
@@ -189,17 +159,10 @@ class OperationFlipOperatorModifier(CppProceduralModifier):
         return code
 
     def _find_flippable_operators(self, node, candidates):
-        """Find operators that can be flipped (expanded to find more operators)."""
+        """Find operators that can be flipped."""
         if node.type == "binary_expression":
-            # The operator is typically a field in binary_expression in C++ tree-sitter
-            # We need to look for operators in the structure
             for child in node.children:
-                # Check for all comparison and logical operators
-                if (
-                    child.type in FLIPPED_OPERATORS
-                    or child.type in COMPARISON_OPS
-                    or child.type in LOGICAL_OPS
-                ):
+                if child.type in FLIPPED_OPERATORS:
                     candidates.append(child)
         for child in node.children:
             self._find_flippable_operators(child, candidates)
@@ -354,15 +317,7 @@ class OperationChangeConstantsModifier(CppProceduralModifier):
 
     def _find_numeric_literals(self, node, candidates):
         """Find numeric literal nodes."""
-        # C++ tree-sitter uses "number_literal" as a general type
-        if node.type in [
-            "number_literal",
-            "decimal_literal",
-            "binary_literal",
-            "octal_literal",
-            "hex_literal",
-            "floating_literal",
-        ]:
+        if node.type == "number_literal":
             candidates.append(node)
         for child in node.children:
             self._find_numeric_literals(child, candidates)

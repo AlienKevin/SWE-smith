@@ -45,6 +45,14 @@ from swesmith.bug_gen.procedural.cpp.operations import (
                 "int baz(int a, int b) {\n    return a + b;\n}",
             ],
         ),
+        (
+            """int bit(int a, int b) {
+    return a & b;
+}""",
+            [
+                "int bit(int a, int b) {\n    return a | b;\n}",
+            ],
+        ),
     ],
 )
 def test_operation_change_modifier(tmp_path, src, expected_variants):
@@ -113,6 +121,14 @@ def test_operation_change_modifier(tmp_path, src, expected_variants):
     return a <= b;
 }""",
         ),
+        (
+            """int shift(int a) {
+    return a << 1;
+}""",
+            """int shift(int a) {
+    return a >> 1;
+}""",
+        ),
     ],
 )
 def test_operation_flip_operator_modifier(tmp_path, src, expected):
@@ -131,6 +147,33 @@ def test_operation_flip_operator_modifier(tmp_path, src, expected):
     assert result.rewrite.strip() == expected.strip(), (
         f"Expected {expected}, got {result.rewrite}"
     )
+
+
+def test_operation_change_modifier_bitwise_xor(tmp_path):
+    """Test that OperationChangeModifier mutates XOR with another bitwise operator."""
+    src = """int bit_xor(int a, int b) {
+    return a ^ b;
+}"""
+    expected_variants = [
+        "int bit_xor(int a, int b) {\n    return a & b;\n}",
+        "int bit_xor(int a, int b) {\n    return a | b;\n}",
+        "int bit_xor(int a, int b) {\n    return a << b;\n}",
+        "int bit_xor(int a, int b) {\n    return a >> b;\n}",
+    ]
+    test_file = tmp_path / "test.cpp"
+    test_file.write_text(src, encoding="utf-8")
+
+    entities = []
+    get_entities_from_file_cpp(entities, str(test_file))
+    assert len(entities) == 1
+
+    modifier = OperationChangeModifier(likelihood=1.0, seed=42)
+    result = modifier.modify(entities[0])
+
+    assert result is not None
+    assert any(
+        result.rewrite.strip() == variant.strip() for variant in expected_variants
+    ), f"Expected one of {expected_variants}, got {result.rewrite}"
 
 
 @pytest.mark.parametrize(
@@ -308,6 +351,10 @@ def test_operation_flip_operator_mappings():
     assert FLIPPED_OPERATORS[">="] == "<"
     assert FLIPPED_OPERATORS["&&"] == "||"
     assert FLIPPED_OPERATORS["||"] == "&&"
+    assert FLIPPED_OPERATORS["&"] == "|"
+    assert FLIPPED_OPERATORS["|"] == "&"
+    assert FLIPPED_OPERATORS["<<"] == ">>"
+    assert FLIPPED_OPERATORS[">>"] == "<<"
 
 
 def test_operation_change_modifier_no_operators(tmp_path):
