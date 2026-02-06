@@ -41,12 +41,10 @@ def _process_single_task(task, issue_gen_dir, repo_id):
 
 
 @app.function(image=image, volumes={"/data": vol}, timeout=1200, max_containers=10)
-def process_repo(task_filename: str):
+def process_repo(task_filename: str, language: str = "javascript"):
     """(Same as before)"""
     import concurrent.futures
 
-    # Assume language is javascript for now or pass it in path
-    language = "javascript"
     task_file_path = Path(f"/data/{language}/task_insts/{task_filename}")
     issue_gen_dir = Path(f"/data/{language}/issue_gen")
 
@@ -152,10 +150,14 @@ def push_to_hf_remote(all_tasks: list, target_dataset: str):
 
 
 @app.local_entrypoint()
-def main(target_dataset: str = "SWE-bench/SWE-smith-js", push: bool = False):
+def main(
+    target_dataset: str = "SWE-bench/SWE-smith-js",
+    language: str = "javascript",
+    push: bool = False,
+):
     print("Listing task files from Modal volume...")
     try:
-        entries = vol.listdir("javascript/task_insts")
+        entries = vol.listdir(f"{language}/task_insts")
         filenames = [e.path.split("/")[-1] for e in entries if e.path.endswith(".json")]
     except Exception as e:
         print(f"Error listing volume: {e}")
@@ -164,7 +166,7 @@ def main(target_dataset: str = "SWE-bench/SWE-smith-js", push: bool = False):
     print(f"Found {len(filenames)} files. Starting parallel processing...")
 
     all_tasks = []
-    for repo_tasks in process_repo.map(filenames):
+    for repo_tasks in process_repo.map(filenames, [language] * len(filenames)):
         all_tasks.extend(repo_tasks)
 
     print(f"Fetched total {len(all_tasks)} task instances.")
