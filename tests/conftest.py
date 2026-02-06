@@ -76,6 +76,11 @@ def test_file_js():
 
 
 @pytest.fixture
+def test_file_ts():
+    return Path(repo_root) / "tests/test_logs/files/typescript/sample.ts"
+
+
+@pytest.fixture
 def test_output_gotest():
     return (
         Path(repo_root)

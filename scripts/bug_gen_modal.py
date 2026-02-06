@@ -130,7 +130,7 @@ SANDBOX_RATE_LIMIT = 4  # Modal limits to 5/s, use 4 to be safe
 LANGUAGE_TO_BASE_CLASS = {
     "python": "PythonProfile",
     "javascript": "JavaScriptProfile",
-    "typescript": "JavaScriptProfile",
+    "typescript": "TypeScriptProfile",
     "golang": "GoProfile",
     "go": "GoProfile",
     "rust": "RustProfile",
