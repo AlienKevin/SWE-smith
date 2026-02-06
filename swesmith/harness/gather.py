@@ -29,6 +29,7 @@ Usage: python -m swesmith.harness.gather logs/run_validation/<run_id>
 import argparse
 import json
 import os
+import shlex
 import subprocess
 import concurrent.futures
 import functools
@@ -464,9 +465,10 @@ def process_instance(
 
         # Apply patch
         applied = False
+        abs_patch_path = shlex.quote(os.path.abspath(path_patch))
         for git_apply in GIT_APPLY_CMDS:
             output = subprocess.run(
-                f"{git_apply} ../{path_patch}",
+                f"{git_apply} {abs_patch_path}",
                 cwd=repo_path,
                 capture_output=True,
                 shell=True,
