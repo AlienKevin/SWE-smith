@@ -25,6 +25,11 @@ from swesmith.bug_gen.procedural.cpp.remove import (
         work();
     } while (running);
 }""",
+        """void qux() {
+    for (auto x : container) {
+        process(x);
+    }
+}""",
     ],
 )
 def test_remove_loop_modifier(tmp_path, src):
@@ -41,12 +46,16 @@ def test_remove_loop_modifier(tmp_path, src):
 
     assert result is not None
     assert result.rewrite != src, "Expected result to differ from source"
-    # The loop structure should be removed or simplified
-    assert (
-        "for" not in result.rewrite
-        or "while" not in result.rewrite
-        or "do" not in result.rewrite
-    ), f"Expected loop keywords to be removed or reduced: {result.rewrite}"
+    # The loop structure should be removed (loop body extracted)
+    # Check for actual loop syntax patterns, not just keywords (e.g., "do" appears in "doSomething")
+    import re
+
+    has_for_loop = re.search(r"\bfor\s*\(", result.rewrite) is not None
+    has_while_loop = re.search(r"\bwhile\s*\(", result.rewrite) is not None
+    has_do_loop = re.search(r"\bdo\s*\{", result.rewrite) is not None
+    assert not (has_for_loop or has_while_loop or has_do_loop), (
+        f"Expected loop structures to be removed: {result.rewrite}"
+    )
 
 
 def test_remove_loop_modifier_extracts_body(tmp_path):
@@ -238,24 +247,3 @@ def test_remove_assign_modifier_no_assignments(tmp_path):
     result = modifier.modify(entities[0])
 
     assert result is None, "Expected None when no assignments are present"
-
-
-def test_remove_loop_range_for(tmp_path):
-    """Test that RemoveLoopModifier handles C++11 range-for loops."""
-    src = """void foo() {
-    for (auto x : container) {
-        process(x);
-    }
-}"""
-    test_file = tmp_path / "test.cpp"
-    test_file.write_text(src, encoding="utf-8")
-
-    entities = []
-    get_entities_from_file_cpp(entities, str(test_file))
-    assert len(entities) == 1
-
-    modifier = RemoveLoopModifier(likelihood=1.0, seed=42)
-    result = modifier.modify(entities[0])
-
-    assert result is not None
-    assert result.rewrite != src, "Expected result to differ from source"

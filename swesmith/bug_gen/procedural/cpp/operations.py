@@ -169,7 +169,7 @@ class OperationFlipOperatorModifier(CppProceduralModifier):
 
 
 class OperationSwapOperandsModifier(CppProceduralModifier):
-    """Swap operands in commutative operations."""
+    """Swap operands in binary expressions (including non-commutative operations)."""
 
     explanation: str = CommonPMs.OPERATION_SWAP_OPERANDS.explanation
     name: str = CommonPMs.OPERATION_SWAP_OPERANDS.name
@@ -193,7 +193,7 @@ class OperationSwapOperandsModifier(CppProceduralModifier):
         )
 
     def _swap_operands(self, code: str, node) -> str:
-        """Swap operands in binary expressions (applies to ALL expressions, not just commutative)."""
+        """Swap operands in binary expressions."""
         candidates = []
         self._find_binary_expressions(node, candidates)
 
@@ -324,7 +324,12 @@ class OperationChangeConstantsModifier(CppProceduralModifier):
 
 
 class OperationBreakChainsModifier(CppProceduralModifier):
-    """Break method chains."""
+    """Break function calls by removing the call (keeps callee, removes arguments).
+
+    Note: The C++ implementation breaks function call chains (e.g., getValue() -> getValue),
+    while the Python implementation breaks binary expression chains (e.g., a + b + c -> a + c).
+    This difference is intentional as it targets common patterns in each language.
+    """
 
     explanation: str = CommonPMs.OPERATION_BREAK_CHAINS.explanation
     name: str = CommonPMs.OPERATION_BREAK_CHAINS.name
@@ -348,10 +353,8 @@ class OperationBreakChainsModifier(CppProceduralModifier):
         )
 
     def _break_chains(self, code: str, node) -> str:
-        """Break method call chains aggressively."""
+        """Break function call chains by removing one level of a call."""
         candidates = []
-        self._find_method_chains(node, candidates)
-        # Also find standalone function calls (not just chains) to break
         self._find_all_function_calls(node, candidates)
 
         if not candidates:
@@ -371,21 +374,9 @@ class OperationBreakChainsModifier(CppProceduralModifier):
 
         return code
 
-    def _find_method_chains(self, node, candidates):
-        """Find chained method calls."""
-        # In C++ tree-sitter, function calls are "call_expression"
-        if node.type == "call_expression":
-            # Check if the callee is also a function call (chained)
-            if node.children and node.children[0].type == "call_expression":
-                candidates.append(node)
-        for child in node.children:
-            self._find_method_chains(child, candidates)
-
     def _find_all_function_calls(self, node, candidates):
-        """Find all function calls (not just chains) to break."""
-        # In C++ tree-sitter, function calls are "call_expression"
+        """Find all function calls to break."""
         if node.type == "call_expression":
-            # Add all function calls, not just chained ones
             candidates.append(node)
         for child in node.children:
             self._find_all_function_calls(child, candidates)

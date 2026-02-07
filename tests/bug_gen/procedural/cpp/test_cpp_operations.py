@@ -257,14 +257,19 @@ def test_operation_break_chains_modifier_chained_calls(tmp_path):
     assert len(entities) == 1
 
     modifier = OperationBreakChainsModifier(likelihood=1.0, seed=42)
-
-    result = None
-    for _ in range(20):
-        result = modifier.modify(entities[0])
-        if result is not None and result.rewrite != src:
-            break
+    result = modifier.modify(entities[0])
 
     assert result is not None, "Expected modifier to produce a result for chained calls"
+    # The modifier removes one level of function call, so either:
+    # - obj.method1().method2() -> obj.method1().method2 (removes outer call)
+    # - obj.method1().method2() -> obj.method1.method2() (removes inner call)
+    valid_rewrites = [
+        "int foo() {\n    return obj.method1().method2;\n}",
+        "int foo() {\n    return obj.method1.method2();\n}",
+    ]
+    assert any(result.rewrite.strip() == v.strip() for v in valid_rewrites), (
+        f"Expected one of {valid_rewrites}, got {result.rewrite}"
+    )
 
 
 def test_operation_break_chains_modifier_no_calls(tmp_path):
@@ -391,3 +396,25 @@ def test_operation_flip_modifier_no_flippable_operators(tmp_path):
     result = modifier.modify(entities[0])
 
     assert result is None
+
+
+def test_operation_change_constants_modifier_float(tmp_path):
+    """Test that OperationChangeConstantsModifier handles floating-point constants."""
+    src = """double foo() {
+    return 3.14 + x;
+}"""
+    test_file = tmp_path / "test.cpp"
+    test_file.write_text(src, encoding="utf-8")
+
+    entities = []
+    get_entities_from_file_cpp(entities, str(test_file))
+    assert len(entities) == 1
+
+    modifier = OperationChangeConstantsModifier(likelihood=1.0, seed=42)
+    result = modifier.modify(entities[0])
+
+    assert result is not None
+    assert result.rewrite != src, "Expected float constant to be modified"
+    # The float constant should be transformed (the exact value depends on the random seed)
+    # We just verify the code was modified - the modifier applies transformations like *10, +100, etc.
+    assert "return" in result.rewrite, f"Expected return statement: {result.rewrite}"
