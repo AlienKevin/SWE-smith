@@ -126,7 +126,11 @@ def test_control_if_else_invert_terminal_else_if_branch(tmp_path):
     # Outer if remains intact while the terminal else-if branch gets inverted.
     assert "if (x > 0)" in result.rewrite
     assert "else if (x < 0)" in result.rewrite
-    assert result.rewrite.index("return 0;") < result.rewrite.index("return -1;")
+    else_if_start = result.rewrite.index("else if (x < 0)")
+    assert result.rewrite.index("return 1;") < else_if_start
+    assert result.rewrite.index("return 0;", else_if_start) < result.rewrite.index(
+        "return -1;", else_if_start
+    )
 
 
 def test_control_if_else_invert_without_braces(tmp_path):
