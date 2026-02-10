@@ -76,6 +76,27 @@ def test_string_literal_modifier_fallback_single_character(tmp_path):
     assert 'return "xx";' in result.rewrite
 
 
+def test_string_literal_modifier_text_block_returns_none(tmp_path):
+    """Test that Java text blocks are ignored."""
+    src = """public String foo() {
+    return \"\"\"
+line one
+line two
+\"\"\";
+}"""
+    test_file = tmp_path / "Test.java"
+    test_file.write_text(src, encoding="utf-8")
+
+    entities = []
+    get_entities_from_file_java(entities, str(test_file))
+    assert len(entities) == 1
+
+    modifier = StringLiteralModifier(likelihood=1.0, seed=42)
+    result = modifier.modify(entities[0])
+
+    assert result is None
+
+
 def test_string_literal_modifier_no_strings(tmp_path):
     """Test that modifier returns None when no string literals are present."""
     src = """public int foo(int x) {
