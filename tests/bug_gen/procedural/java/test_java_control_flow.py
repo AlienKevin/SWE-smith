@@ -101,8 +101,8 @@ def test_control_if_else_invert_no_else(tmp_path):
     assert result is None
 
 
-def test_control_if_else_invert_else_if_chain_returns_none(tmp_path):
-    """Test that else-if chains are not modified."""
+def test_control_if_else_invert_terminal_else_if_branch(tmp_path):
+    """Test that terminal else-if branches are eligible for inversion."""
     src = """public int foo(int x) {
     if (x > 0) {
         return 1;
@@ -122,7 +122,11 @@ def test_control_if_else_invert_else_if_chain_returns_none(tmp_path):
     modifier = ControlIfElseInvertModifier(likelihood=1.0, seed=42)
     result = modifier.modify(entities[0])
 
-    assert result is None
+    assert result is not None
+    # Outer if remains intact while the terminal else-if branch gets inverted.
+    assert "if (x > 0)" in result.rewrite
+    assert "else if (x < 0)" in result.rewrite
+    assert result.rewrite.index("return 0;") < result.rewrite.index("return -1;")
 
 
 def test_control_if_else_invert_without_braces(tmp_path):

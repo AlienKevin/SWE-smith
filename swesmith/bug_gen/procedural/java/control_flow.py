@@ -81,14 +81,13 @@ class ControlIfElseInvertModifier(JavaProceduralModifier):
         return code
 
     def _find_if_else_statements(self, node, candidates):
-        """Find simple if-else statements (not else-if chains)."""
-        if node.type == "if_statement":
-            # Skip if-statements that are themselves an "else-if" branch.
-            if self._is_else_if_branch(node):
-                for child in node.children:
-                    self._find_if_else_statements(child, candidates)
-                return
+        """Find invertible if/else statements.
 
+        We skip if-statements whose else branch points to another if-statement
+        (chain head/middle), but allow terminal else-if nodes that end in an
+        actual else branch.
+        """
+        if node.type == "if_statement":
             # Check if it has an else branch
             has_else = False
             has_else_if = False
@@ -109,16 +108,3 @@ class ControlIfElseInvertModifier(JavaProceduralModifier):
 
         for child in node.children:
             self._find_if_else_statements(child, candidates)
-
-    @staticmethod
-    def _is_else_if_branch(node) -> bool:
-        """Return True when node is the if-statement that follows an else token."""
-        parent = node.parent
-        if parent is None or parent.type != "if_statement":
-            return False
-
-        siblings = parent.children
-        for i, sibling in enumerate(siblings):
-            if sibling == node and i > 0 and siblings[i - 1].type == "else":
-                return True
-        return False
