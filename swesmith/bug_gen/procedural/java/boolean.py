@@ -83,30 +83,13 @@ class BooleanNegateModifier(JavaProceduralModifier):
                 if child.type == "!":
                     candidates.append(node)
                     break
-        # Boolean variables/fields in conditions
+        # Boolean variables/method calls in condition expressions.
+        # In if/while/do, parenthesized_expression wraps the condition.
+        # In for-loops, the condition can be directly under for_statement.
         elif (
-            node.type == "identifier"
+            node.type in ["identifier", "field_access", "method_invocation"]
             and node.parent
-            and node.parent.type
-            in [
-                "if_statement",
-                "while_statement",
-                "do_statement",
-                "parenthesized_expression",
-            ]
-        ):
-            candidates.append(node)
-        # Boolean method calls
-        elif (
-            node.type == "method_invocation"
-            and node.parent
-            and node.parent.type
-            in [
-                "if_statement",
-                "while_statement",
-                "do_statement",
-                "parenthesized_expression",
-            ]
+            and node.parent.type in ["parenthesized_expression", "for_statement"]
         ):
             candidates.append(node)
 

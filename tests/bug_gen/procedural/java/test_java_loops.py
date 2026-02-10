@@ -69,6 +69,30 @@ def test_loop_break_continue_swap_no_break_continue(tmp_path):
     assert result is None
 
 
+def test_loop_break_continue_swap_ignores_switch_break(tmp_path):
+    """Test that switch-only break statements are not swapped."""
+    src = """public int foo(int x) {
+    switch (x) {
+        case 0:
+            break;
+        default:
+            return x;
+    }
+    return 0;
+}"""
+    test_file = tmp_path / "Test.java"
+    test_file.write_text(src, encoding="utf-8")
+
+    entities = []
+    get_entities_from_file_java(entities, str(test_file))
+    assert len(entities) == 1
+
+    modifier = LoopBreakContinueSwapModifier(likelihood=1.0, seed=42)
+    result = modifier.modify(entities[0])
+
+    assert result is None
+
+
 @pytest.mark.parametrize(
     "src,original_op,expected_ops",
     [
@@ -98,6 +122,26 @@ def test_loop_break_continue_swap_no_break_continue(tmp_path):
 }""",
             "<=",
             ["<"],
+        ),
+        (
+            """public void whileLoop() {
+    int i = 0;
+    while (i < 10) {
+        i++;
+    }
+}""",
+            "<",
+            ["<="],
+        ),
+        (
+            """public void doLoop() {
+    int i = 0;
+    do {
+        i++;
+    } while (i < 10);
+}""",
+            "<",
+            ["<="],
         ),
     ],
 )

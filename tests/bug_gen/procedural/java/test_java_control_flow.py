@@ -99,3 +99,49 @@ def test_control_if_else_invert_no_else(tmp_path):
     result = modifier.modify(entities[0])
 
     assert result is None
+
+
+def test_control_if_else_invert_else_if_chain_returns_none(tmp_path):
+    """Test that else-if chains are not modified."""
+    src = """public int foo(int x) {
+    if (x > 0) {
+        return 1;
+    } else if (x < 0) {
+        return -1;
+    } else {
+        return 0;
+    }
+}"""
+    test_file = tmp_path / "Test.java"
+    test_file.write_text(src, encoding="utf-8")
+
+    entities = []
+    get_entities_from_file_java(entities, str(test_file))
+    assert len(entities) == 1
+
+    modifier = ControlIfElseInvertModifier(likelihood=1.0, seed=42)
+    result = modifier.modify(entities[0])
+
+    assert result is None
+
+
+def test_control_if_else_invert_without_braces(tmp_path):
+    """Test that modifier handles if/else statements without braces."""
+    src = """public int foo(int x) {
+    if (x > 0)
+        return 1;
+    else
+        return -1;
+}"""
+    test_file = tmp_path / "Test.java"
+    test_file.write_text(src, encoding="utf-8")
+
+    entities = []
+    get_entities_from_file_java(entities, str(test_file))
+    assert len(entities) == 1
+
+    modifier = ControlIfElseInvertModifier(likelihood=1.0, seed=42)
+    result = modifier.modify(entities[0])
+
+    assert result is not None
+    assert "if (x > 0) return -1; else return 1;" in result.rewrite

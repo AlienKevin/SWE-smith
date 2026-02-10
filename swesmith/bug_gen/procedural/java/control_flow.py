@@ -56,12 +56,18 @@ class ControlIfElseInvertModifier(JavaProceduralModifier):
         condition = None
         if_body = None
         else_body = None
+        then_statement = None
 
         for i, child in enumerate(target.children):
             if child.type == "parenthesized_expression":
                 condition = code[child.start_byte : child.end_byte]
-            elif child.type == "block" and if_body is None:
-                if_body = code[child.start_byte : child.end_byte]
+                # The immediate sibling after the condition is the "then" statement,
+                # which may be a block or a single statement.
+                if i + 1 < len(target.children):
+                    then_statement = target.children[i + 1]
+                    if_body = code[
+                        then_statement.start_byte : then_statement.end_byte
+                    ]
             elif child.type == "else":
                 # Next sibling should be the else body
                 if i + 1 < len(target.children):
@@ -79,6 +85,12 @@ class ControlIfElseInvertModifier(JavaProceduralModifier):
     def _find_if_else_statements(self, node, candidates):
         """Find simple if-else statements (not else-if chains)."""
         if node.type == "if_statement":
+            # Skip if-statements that are themselves an "else-if" branch.
+            if self._is_else_if_branch(node):
+                for child in node.children:
+                    self._find_if_else_statements(child, candidates)
+                return
+
             # Check if it has an else branch
             has_else = False
             has_else_if = False
@@ -99,3 +111,16 @@ class ControlIfElseInvertModifier(JavaProceduralModifier):
 
         for child in node.children:
             self._find_if_else_statements(child, candidates)
+
+    @staticmethod
+    def _is_else_if_branch(node) -> bool:
+        """Return True when node is the if-statement that follows an else token."""
+        parent = node.parent
+        if parent is None or parent.type != "if_statement":
+            return False
+
+        siblings = parent.children
+        for i, sibling in enumerate(siblings):
+            if sibling == node and i > 0 and siblings[i - 1].type == "else":
+                return True
+        return False

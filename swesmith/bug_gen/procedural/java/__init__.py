@@ -10,7 +10,6 @@ from swesmith.bug_gen.procedural.java.control_flow import (
     ControlIfElseInvertModifier,
 )
 from swesmith.bug_gen.procedural.java.literals import (
-    ClassRemoveInterfaceModifier,
     StringLiteralModifier,
 )
 from swesmith.bug_gen.procedural.java.loops import (
@@ -64,5 +63,4 @@ MODIFIERS_JAVA: list[ProceduralModifier] = [
     RemoveNullCheckModifier(likelihood=0.5),  # Removes null checks
     # Literal modifications
     StringLiteralModifier(likelihood=0.5),  # Modifies string literals
-    ClassRemoveInterfaceModifier(likelihood=0.3),  # Removes interface implementations
 ]

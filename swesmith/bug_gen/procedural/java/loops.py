@@ -9,6 +9,12 @@ from swesmith.bug_gen.procedural.java.base import JavaProceduralModifier
 from swesmith.constants import BugRewrite, CodeEntity, CodeProperty
 
 JAVA_LANGUAGE = Language(tsjava.language())
+LOOP_STATEMENT_TYPES = {
+    "for_statement",
+    "enhanced_for_statement",
+    "while_statement",
+    "do_statement",
+}
 
 
 class LoopBreakContinueSwapModifier(JavaProceduralModifier):
@@ -65,15 +71,24 @@ class LoopBreakContinueSwapModifier(JavaProceduralModifier):
             strategy=self.name,
         )
 
-    def _find_break_continue(self, node, breaks, continues):
-        """Recursively find break and continue statements."""
-        if node.type == "break_statement":
+    def _find_break_continue(
+        self,
+        node,
+        breaks,
+        continues,
+        loop_depth: int = 0,
+    ):
+        """Recursively find break/continue statements that are inside loops."""
+        if node.type == "break_statement" and loop_depth > 0:
             breaks.append(node)
-        elif node.type == "continue_statement":
+        elif node.type == "continue_statement" and loop_depth > 0:
             continues.append(node)
 
+        child_loop_depth = (
+            loop_depth + 1 if node.type in LOOP_STATEMENT_TYPES else loop_depth
+        )
         for child in node.children:
-            self._find_break_continue(child, breaks, continues)
+            self._find_break_continue(child, breaks, continues, child_loop_depth)
 
 
 class LoopOffByOneModifier(JavaProceduralModifier):

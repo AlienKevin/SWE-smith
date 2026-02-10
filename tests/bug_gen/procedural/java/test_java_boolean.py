@@ -28,6 +28,44 @@ from swesmith.bug_gen.procedural.java.boolean import (
 }""",
             ["!flag"],
         ),
+        (
+            """public boolean literalFalse() {
+    return false;
+}""",
+            ["return true;"],
+        ),
+        (
+            """public void whileLoop() {
+    while (false) {
+        doSomething();
+    }
+}""",
+            ["while (true)"],
+        ),
+        (
+            """public void doLoop(boolean ready) {
+    do {
+        doSomething();
+    } while (ready);
+}""",
+            ["!ready"],
+        ),
+        (
+            """public void forLoop(boolean flag) {
+    for (; flag; ) {
+        doSomething();
+    }
+}""",
+            ["!flag"],
+        ),
+        (
+            """public void methodInvocation() {
+    if (isReady()) {
+        doSomething();
+    }
+}""",
+            ["!isReady()"],
+        ),
     ],
 )
 def test_boolean_negate_modifier(tmp_path, src, expected_changes):
