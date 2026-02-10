@@ -65,9 +65,7 @@ class ControlIfElseInvertModifier(JavaProceduralModifier):
                 # which may be a block or a single statement.
                 if i + 1 < len(target.children):
                     then_statement = target.children[i + 1]
-                    if_body = code[
-                        then_statement.start_byte : then_statement.end_byte
-                    ]
+                    if_body = code[then_statement.start_byte : then_statement.end_byte]
             elif child.type == "else":
                 # Next sibling should be the else body
                 if i + 1 < len(target.children):
