@@ -15,9 +15,6 @@ class RemoveLoopModifier(RustProceduralModifier):
 
     def modify(self, code_entity: CodeEntity) -> BugRewrite:
         """Remove loop statements from the Rust code."""
-        if not self.flip():
-            return None
-
         parser = Parser(RUST_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
 
@@ -65,9 +62,6 @@ class RemoveConditionalModifier(RustProceduralModifier):
 
     def modify(self, code_entity: CodeEntity) -> BugRewrite:
         """Remove conditional statements from the Rust code."""
-        if not self.flip():
-            return None
-
         parser = Parser(RUST_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
 
@@ -115,9 +109,6 @@ class RemoveAssignModifier(RustProceduralModifier):
 
     def modify(self, code_entity: CodeEntity) -> BugRewrite:
         """Remove assignment statements from the Rust code."""
-        if not self.flip():
-            return None
-
         parser = Parser(RUST_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
 

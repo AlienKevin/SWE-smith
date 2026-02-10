@@ -1,19 +1,17 @@
 """
-Operation-related procedural modifications for Java code.
+Operation-related procedural modifications for C++ code.
 """
 
-import random
-
-import tree_sitter_java as tsjava
+import tree_sitter_cpp as tscpp
 from tree_sitter import Language, Parser
 
 from swesmith.bug_gen.procedural.base import CommonPMs
-from swesmith.bug_gen.procedural.java.base import JavaProceduralModifier
+from swesmith.bug_gen.procedural.cpp.base import CppProceduralModifier
 from swesmith.constants import BugRewrite, CodeEntity
 
-JAVA_LANGUAGE = Language(tsjava.language())
+CPP_LANGUAGE = Language(tscpp.language())
 
-# Operator mappings for Java
+# Operator mappings for C++
 FLIPPED_OPERATORS = {
     "==": "!=",
     "!=": "==",
@@ -23,15 +21,38 @@ FLIPPED_OPERATORS = {
     ">=": "<",
     "&&": "||",
     "||": "&&",
+    "&": "|",
+    "|": "&",
+    "<<": ">>",
+    ">>": "<<",
+}
+
+# Aggressive operator transformations that are more likely to break tests
+AGGRESSIVE_ARITHMETIC_TRANSFORMS = {
+    "+": ["-", "*", "/"],  # Addition -> subtraction, multiplication, or division
+    "-": ["+", "*", "/"],  # Subtraction -> addition, multiplication, or division
+    "*": [
+        "/",
+        "-",
+        "+",
+    ],  # Multiplication -> division (can cause div by zero), subtraction, or addition
+    "/": [
+        "*",
+        "+",
+        "-",
+    ],  # Division -> multiplication (can cause overflow), addition, or subtraction
+    "%": ["/", "*", "-"],  # Modulo -> division, multiplication, or subtraction
 }
 
 ARITHMETIC_OPS = {"+", "-", "*", "/", "%"}
 COMPARISON_OPS = {"<", ">", "<=", ">=", "==", "!="}
 LOGICAL_OPS = {"&&", "||"}
+BITWISE_OPS = {"&", "|", "^", "<<", ">>"}
+SUPPORTED_BINARY_OPERATORS = ARITHMETIC_OPS | COMPARISON_OPS | LOGICAL_OPS | BITWISE_OPS
 
 
-class OperationChangeModifier(JavaProceduralModifier):
-    """Randomly change operations in Java code."""
+class OperationChangeModifier(CppProceduralModifier):
+    """Randomly change operations in C++ code."""
 
     explanation: str = CommonPMs.OPERATION_CHANGE.explanation
     name: str = CommonPMs.OPERATION_CHANGE.name
@@ -41,12 +62,11 @@ class OperationChangeModifier(JavaProceduralModifier):
         if not self.flip():
             return None
 
-        parser = Parser(JAVA_LANGUAGE)
+        parser = Parser(CPP_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
         modified_code = self._change_operations(code_entity.src_code, tree.root_node)
 
-        # Validate syntax before returning
-        if not self.validate_syntax(code_entity.src_code, modified_code):
+        if modified_code == code_entity.src_code:
             return None
 
         return BugRewrite(
@@ -56,7 +76,7 @@ class OperationChangeModifier(JavaProceduralModifier):
         )
 
     def _change_operations(self, code: str, node) -> str:
-        """Change random operations in the code."""
+        """Change operations in the code with aggressive transformations."""
         candidates = []
         self._find_operations(node, candidates)
 
@@ -64,20 +84,20 @@ class OperationChangeModifier(JavaProceduralModifier):
             return code
 
         # Select a random operation to change
-        target = random.choice(candidates)
+        target = self.rand.choice(candidates)
         operator_text = code[target.start_byte : target.end_byte]
 
-        # Choose a replacement from the same category
+        # Choose a replacement with aggressive transformations
         replacement = None
-        if operator_text in ARITHMETIC_OPS:
-            ops = list(ARITHMETIC_OPS - {operator_text})
-            replacement = random.choice(ops) if ops else None
-        elif operator_text in COMPARISON_OPS:
-            ops = list(COMPARISON_OPS - {operator_text})
-            replacement = random.choice(ops) if ops else None
-        elif operator_text in LOGICAL_OPS:
-            ops = list(LOGICAL_OPS - {operator_text})
-            replacement = random.choice(ops) if ops else None
+        if operator_text in AGGRESSIVE_ARITHMETIC_TRANSFORMS:
+            # Use aggressive arithmetic transformations (more likely to break)
+            replacement = self.rand.choice(
+                AGGRESSIVE_ARITHMETIC_TRANSFORMS[operator_text]
+            )
+        elif operator_text in FLIPPED_OPERATORS:
+            replacement = FLIPPED_OPERATORS[operator_text]
+        elif operator_text in BITWISE_OPS:
+            replacement = self.rand.choice(list(BITWISE_OPS - {operator_text}))
 
         if replacement:
             return code[: target.start_byte] + replacement + code[target.end_byte :]
@@ -85,43 +105,20 @@ class OperationChangeModifier(JavaProceduralModifier):
         return code
 
     def _find_operations(self, node, candidates):
-        """Find all binary operators in the AST (excluding string concatenations)."""
+        """Find all binary operators in the AST."""
         if node.type == "binary_expression":
-            # Check if this is a string concatenation
-            has_string_literal = any(
-                child.type == "string_literal" for child in node.children
-            )
-
-            # Find the operator child
+            # In C++ tree-sitter, the operator is typically the 2nd child (after first operand)
+            # We need to find the operator token
             for child in node.children:
-                # Skip + operator if it involves strings (string concatenation)
-                if child.type == "+" and has_string_literal:
-                    continue
-                if child.type in [
-                    "+",
-                    "-",
-                    "*",
-                    "/",
-                    "%",
-                    "<",
-                    ">",
-                    "<=",
-                    ">=",
-                    "==",
-                    "!=",
-                    "&&",
-                    "||",
-                ]:
-                    # Only add arithmetic ops if no string literals involved
-                    if child.type in ["+", "-", "*", "/", "%"] and has_string_literal:
-                        continue
+                # Check if this is an operator by looking for patterns
+                if child.type in SUPPORTED_BINARY_OPERATORS:
                     candidates.append(child)
         for child in node.children:
             self._find_operations(child, candidates)
 
 
-class OperationFlipOperatorModifier(JavaProceduralModifier):
-    """Flip comparison and logical operators."""
+class OperationFlipOperatorModifier(CppProceduralModifier):
+    """Flip comparison, logical, and selected bitwise operators."""
 
     explanation: str = CommonPMs.OPERATION_FLIP_OPERATOR.explanation
     name: str = CommonPMs.OPERATION_FLIP_OPERATOR.name
@@ -131,12 +128,11 @@ class OperationFlipOperatorModifier(JavaProceduralModifier):
         if not self.flip():
             return None
 
-        parser = Parser(JAVA_LANGUAGE)
+        parser = Parser(CPP_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
         modified_code = self._flip_operators(code_entity.src_code, tree.root_node)
 
-        # Validate syntax before returning
-        if not self.validate_syntax(code_entity.src_code, modified_code):
+        if modified_code == code_entity.src_code:
             return None
 
         return BugRewrite(
@@ -146,14 +142,14 @@ class OperationFlipOperatorModifier(JavaProceduralModifier):
         )
 
     def _flip_operators(self, code: str, node) -> str:
-        """Flip comparison/logical operators."""
+        """Flip operators that have a mapped opposite."""
         candidates = []
         self._find_flippable_operators(node, candidates)
 
         if not candidates:
             return code
 
-        target = random.choice(candidates)
+        target = self.rand.choice(candidates)
         operator_text = code[target.start_byte : target.end_byte]
 
         if operator_text in FLIPPED_OPERATORS:
@@ -166,15 +162,14 @@ class OperationFlipOperatorModifier(JavaProceduralModifier):
         """Find operators that can be flipped."""
         if node.type == "binary_expression":
             for child in node.children:
-                text = child.text.decode("utf-8") if hasattr(child, "text") else ""
-                if text in FLIPPED_OPERATORS:
+                if child.type in FLIPPED_OPERATORS:
                     candidates.append(child)
         for child in node.children:
             self._find_flippable_operators(child, candidates)
 
 
-class OperationSwapOperandsModifier(JavaProceduralModifier):
-    """Swap operands in commutative operations."""
+class OperationSwapOperandsModifier(CppProceduralModifier):
+    """Swap operands in binary expressions (including non-commutative operations)."""
 
     explanation: str = CommonPMs.OPERATION_SWAP_OPERANDS.explanation
     name: str = CommonPMs.OPERATION_SWAP_OPERANDS.name
@@ -184,12 +179,11 @@ class OperationSwapOperandsModifier(JavaProceduralModifier):
         if not self.flip():
             return None
 
-        parser = Parser(JAVA_LANGUAGE)
+        parser = Parser(CPP_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
         modified_code = self._swap_operands(code_entity.src_code, tree.root_node)
 
-        # Validate syntax before returning
-        if not self.validate_syntax(code_entity.src_code, modified_code):
+        if modified_code == code_entity.src_code:
             return None
 
         return BugRewrite(
@@ -206,7 +200,7 @@ class OperationSwapOperandsModifier(JavaProceduralModifier):
         if not candidates:
             return code
 
-        target = random.choice(candidates)
+        target = self.rand.choice(candidates)
         if len(target.children) >= 3:
             left = target.children[0]
             right = target.children[2]
@@ -218,6 +212,7 @@ class OperationSwapOperandsModifier(JavaProceduralModifier):
             operator_node = target.children[1]
             operator_text = code[operator_node.start_byte : operator_node.end_byte]
 
+            # Swap operands - this will break non-commutative operations like -, /, %, <, >, etc.
             return (
                 code[: left.start_byte]
                 + right_text
@@ -238,7 +233,7 @@ class OperationSwapOperandsModifier(JavaProceduralModifier):
             self._find_binary_expressions(child, candidates)
 
 
-class OperationChangeConstantsModifier(JavaProceduralModifier):
+class OperationChangeConstantsModifier(CppProceduralModifier):
     """Change numeric constants."""
 
     explanation: str = CommonPMs.OPERATION_CHANGE_CONSTANTS.explanation
@@ -249,12 +244,11 @@ class OperationChangeConstantsModifier(JavaProceduralModifier):
         if not self.flip():
             return None
 
-        parser = Parser(JAVA_LANGUAGE)
+        parser = Parser(CPP_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
         modified_code = self._change_constants(code_entity.src_code, tree.root_node)
 
-        # Validate syntax before returning
-        if not self.validate_syntax(code_entity.src_code, modified_code):
+        if modified_code == code_entity.src_code:
             return None
 
         return BugRewrite(
@@ -264,45 +258,78 @@ class OperationChangeConstantsModifier(JavaProceduralModifier):
         )
 
     def _change_constants(self, code: str, node) -> str:
-        """Change numeric constants."""
+        """Change numeric constants with aggressive transformations."""
         candidates = []
         self._find_numeric_literals(node, candidates)
 
         if not candidates:
             return code
 
-        target = random.choice(candidates)
+        target = self.rand.choice(candidates)
         original = code[target.start_byte : target.end_byte]
 
         try:
             if "." in original:
                 value = float(original)
-                new_value = value + random.choice([-1.0, 1.0, -0.1, 0.1])
+                # Aggressive changes: multiply/divide by large factors, or change to 0/1/-1
+                transformations = [
+                    value * 10,
+                    value * 100,
+                    value / 10,
+                    value / 100,
+                    value + 100.0,
+                    value - 100.0,
+                    0.0,
+                    1.0,
+                    -1.0,
+                    value * -1,  # Negate
+                ]
+                new_value = self.rand.choice(transformations)
             else:
                 value = int(original, 0)  # Handles hex, octal, etc.
-                new_value = value + random.choice([-1, 1, -10, 10])
+                # Aggressive changes: multiply/divide by large factors, or change to 0/1/-1
+                transformations = [
+                    value * 10,
+                    value * 100,
+                    value // 10 if value != 0 else 0,
+                    value // 100 if value != 0 else 0,
+                    value + 100,
+                    value - 100,
+                    0,
+                    1,
+                    -1,
+                    value * -1,  # Negate
+                    abs(value) + 1,  # Always positive + 1
+                ]
+                new_value = self.rand.choice(transformations)
+                # Ensure we don't create invalid values
+                if (
+                    new_value < 0
+                    and original.startswith("0x")
+                    and "u" in original.lower()
+                ):
+                    # Unsigned hex, keep positive
+                    new_value = abs(new_value)
 
             return code[: target.start_byte] + str(new_value) + code[target.end_byte :]
-        except (ValueError, OverflowError):
+        except (ValueError, OverflowError, ZeroDivisionError):
             return code
 
     def _find_numeric_literals(self, node, candidates):
         """Find numeric literal nodes."""
-        if node.type in [
-            "decimal_integer_literal",
-            "hex_integer_literal",
-            "octal_integer_literal",
-            "binary_integer_literal",
-            "decimal_floating_point_literal",
-            "hex_floating_point_literal",
-        ]:
+        if node.type == "number_literal":
             candidates.append(node)
         for child in node.children:
             self._find_numeric_literals(child, candidates)
 
 
-class OperationBreakChainsModifier(JavaProceduralModifier):
-    """Break method chains."""
+class OperationBreakChainsModifier(CppProceduralModifier):
+    """Break function calls by removing the call (keeps callee, removes arguments).
+
+    Note: The C++ implementation breaks function call chains (e.g., getValue() -> getValue),
+    while the Python implementation breaks binary expression chains (e.g., a + b + c -> a + c).
+    This difference is intentional as it targets common patterns in each language.
+    """
 
     explanation: str = CommonPMs.OPERATION_BREAK_CHAINS.explanation
     name: str = CommonPMs.OPERATION_BREAK_CHAINS.name
@@ -312,12 +339,11 @@ class OperationBreakChainsModifier(JavaProceduralModifier):
         if not self.flip():
             return None
 
-        parser = Parser(JAVA_LANGUAGE)
+        parser = Parser(CPP_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
         modified_code = self._break_chains(code_entity.src_code, tree.root_node)
 
-        # Validate syntax before returning
-        if not self.validate_syntax(code_entity.src_code, modified_code):
+        if modified_code == code_entity.src_code:
             return None
 
         return BugRewrite(
@@ -327,31 +353,30 @@ class OperationBreakChainsModifier(JavaProceduralModifier):
         )
 
     def _break_chains(self, code: str, node) -> str:
-        """Break method call chains."""
+        """Break function call chains by removing one level of a call."""
         candidates = []
-        self._find_method_chains(node, candidates)
+        self._find_all_function_calls(node, candidates)
 
         if not candidates:
             return code
 
-        target = random.choice(candidates)
-        # Remove one method call from the chain
-        if len(target.children) >= 2:
-            # Keep just the first part
-            first_part = target.children[0]
+        target = self.rand.choice(candidates)
+        # Remove one function call from the chain
+        # In C++ tree-sitter, call_expression structure: [callee, arguments]
+        if len(target.children) >= 1:
+            # Keep just the callee part (removes the function call and arguments)
+            callee = target.children[0]
             return (
                 code[: target.start_byte]
-                + code[first_part.start_byte : first_part.end_byte]
+                + code[callee.start_byte : callee.end_byte]
                 + code[target.end_byte :]
             )
 
         return code
 
-    def _find_method_chains(self, node, candidates):
-        """Find chained method calls."""
-        if node.type == "method_invocation":
-            # Check if object is also a method invocation (chained)
-            if node.children and node.children[0].type == "method_invocation":
-                candidates.append(node)
+    def _find_all_function_calls(self, node, candidates):
+        """Find all function calls to break."""
+        if node.type == "call_expression":
+            candidates.append(node)
         for child in node.children:
-            self._find_method_chains(child, candidates)
+            self._find_all_function_calls(child, candidates)

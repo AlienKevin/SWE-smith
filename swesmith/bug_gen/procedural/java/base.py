@@ -42,7 +42,7 @@ class JavaProceduralModifier(ProceduralModifier, ABC):
         return check_for_errors(tree.root_node)
 
     @staticmethod
-    def validate_syntax(original_code: str, modified_code: str) -> bool:
+    def validate_syntax(original_code: str, modified_code: str) -> bool | None:
         """
         Validate that modified code doesn't introduce syntax errors.
 
@@ -51,11 +51,13 @@ class JavaProceduralModifier(ProceduralModifier, ABC):
             modified_code: Modified source code
 
         Returns:
-            True if modified code is valid, False if it has syntax errors
+            True if modified code is syntactically valid,
+            False if it has syntax errors,
+            None if the code is unchanged
         """
-        # If modification didn't change anything, it's valid
+        # Return None so callers can reject no-op rewrites explicitly.
         if original_code == modified_code:
-            return False
+            return None
 
         # Check if modified code has syntax errors
         return not JavaProceduralModifier.has_syntax_errors(modified_code)

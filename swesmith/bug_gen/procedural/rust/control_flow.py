@@ -16,9 +16,6 @@ class ControlIfElseInvertModifier(RustProceduralModifier):
 
     def modify(self, code_entity: CodeEntity) -> BugRewrite:
         """Apply if-else inversion to the Rust code."""
-        if not self.flip():
-            return None
-
         parser = Parser(RUST_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
 
