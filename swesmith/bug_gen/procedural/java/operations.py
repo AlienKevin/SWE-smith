@@ -338,8 +338,9 @@ class OperationChangeConstantsModifier(JavaProceduralModifier):
                     suffix = core[-1]
                     core = core[:-1]
 
-                if literal_type == "hex_floating_point_literal" or core.lower().startswith(
-                    ("0x", "+0x", "-0x")
+                if (
+                    literal_type == "hex_floating_point_literal"
+                    or core.lower().startswith(("0x", "+0x", "-0x"))
                 ):
                     value = float.fromhex(core)
                 else:
