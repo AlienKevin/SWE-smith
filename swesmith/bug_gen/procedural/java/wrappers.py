@@ -159,13 +159,35 @@ class RemoveNullCheckModifier(JavaProceduralModifier):
                 condition_text = code[
                     condition_node.start_byte : condition_node.end_byte
                 ]
-                if "null" in condition_text and (
-                    "!=" in condition_text or "==" in condition_text
-                ):
+                if self._is_simple_null_check(condition_text):
                     results.append(node)
 
         for child in node.children:
             self._find_null_check_ifs(child, code, results)
+
+    @staticmethod
+    def _is_simple_null_check(condition_text: str) -> bool:
+        """Return True only for standalone null checks like `(x == null)`."""
+        text = condition_text.strip()
+        if text.startswith("(") and text.endswith(")"):
+            text = text[1:-1].strip()
+
+        # Skip compound conditions to avoid removing unrelated expressions.
+        if "&&" in text or "||" in text:
+            return False
+
+        if "==" in text:
+            parts = text.split("==")
+        elif "!=" in text:
+            parts = text.split("!=")
+        else:
+            return False
+
+        if len(parts) != 2:
+            return False
+
+        left, right = parts[0].strip(), parts[1].strip()
+        return left == "null" or right == "null"
 
     def _extract_block_content(self, code: str, block_node):
         """Extract content inside block braces."""
