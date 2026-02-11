@@ -28,6 +28,16 @@ FLIPPED_OPERATORS = {
 ARITHMETIC_OPS = {"+", "-", "*", "/", "%"}
 COMPARISON_OPS = {"<", ">", "<=", ">=", "==", "!="}
 LOGICAL_OPS = {"&&", "||"}
+BITWISE_OPS = {"&", "|", "^", "<<", ">>", ">>>"}
+SUPPORTED_BINARY_OPERATORS = ARITHMETIC_OPS | COMPARISON_OPS | LOGICAL_OPS | BITWISE_OPS
+INTEGER_LITERAL_TYPES = {
+    "decimal_integer_literal",
+    "hex_integer_literal",
+    "octal_integer_literal",
+    "binary_integer_literal",
+}
+FLOAT_LITERAL_TYPES = {"decimal_floating_point_literal", "hex_floating_point_literal"}
+NUMERIC_LITERAL_TYPES = INTEGER_LITERAL_TYPES | FLOAT_LITERAL_TYPES
 
 
 class OperationChangeModifier(JavaProceduralModifier):
@@ -78,6 +88,9 @@ class OperationChangeModifier(JavaProceduralModifier):
         elif operator_text in LOGICAL_OPS:
             ops = list(LOGICAL_OPS - {operator_text})
             replacement = random.choice(ops) if ops else None
+        elif operator_text in BITWISE_OPS:
+            ops = list(BITWISE_OPS - {operator_text})
+            replacement = random.choice(ops) if ops else None
 
         if replacement:
             return code[: target.start_byte] + replacement + code[target.end_byte :]
@@ -86,38 +99,62 @@ class OperationChangeModifier(JavaProceduralModifier):
 
     def _find_operations(self, node, candidates):
         """Find all binary operators in the AST (excluding string concatenations)."""
-        if node.type == "binary_expression":
-            # Check if this is a string concatenation
-            has_string_literal = any(
-                child.type == "string_literal" for child in node.children
+        if node.type == "binary_expression" and len(node.children) >= 3:
+            operator_node = node.children[1]
+            operator_text = (
+                operator_node.text.decode("utf-8")
+                if hasattr(operator_node, "text")
+                else ""
             )
 
-            # Find the operator child
-            for child in node.children:
-                # Skip + operator if it involves strings (string concatenation)
-                if child.type == "+" and has_string_literal:
-                    continue
-                if child.type in [
-                    "+",
-                    "-",
-                    "*",
-                    "/",
-                    "%",
-                    "<",
-                    ">",
-                    "<=",
-                    ">=",
-                    "==",
-                    "!=",
-                    "&&",
-                    "||",
-                ]:
-                    # Only add arithmetic ops if no string literals involved
-                    if child.type in ["+", "-", "*", "/", "%"] and has_string_literal:
-                        continue
-                    candidates.append(child)
+            if operator_text in SUPPORTED_BINARY_OPERATORS:
+                if operator_text != "+" or not self._is_potential_string_concat(node):
+                    candidates.append(operator_node)
         for child in node.children:
             self._find_operations(child, candidates)
+
+    def _is_potential_string_concat(self, binary_node) -> bool:
+        """Treat '+' as arithmetic only when both sides are clearly numeric."""
+        if len(binary_node.children) < 3:
+            return True
+        left = binary_node.children[0]
+        right = binary_node.children[2]
+        return not (
+            self._is_definitely_numeric_expression(left)
+            and self._is_definitely_numeric_expression(right)
+        )
+
+    def _is_definitely_numeric_expression(self, node) -> bool:
+        """Conservative numeric-expression check used to avoid mutating string concat."""
+        if node.type in NUMERIC_LITERAL_TYPES:
+            return True
+        if node.type == "parenthesized_expression":
+            for child in node.children:
+                if child.type in {"(", ")"}:
+                    continue
+                return self._is_definitely_numeric_expression(child)
+            return False
+        if node.type == "unary_expression":
+            for child in node.children:
+                if child.type in {"+", "-", "++", "--"}:
+                    continue
+                return self._is_definitely_numeric_expression(child)
+            return False
+        if node.type == "binary_expression" and len(node.children) >= 3:
+            operator_node = node.children[1]
+            operator_text = (
+                operator_node.text.decode("utf-8")
+                if hasattr(operator_node, "text")
+                else ""
+            )
+            if operator_text not in ARITHMETIC_OPS:
+                return False
+            left = node.children[0]
+            right = node.children[2]
+            return self._is_definitely_numeric_expression(
+                left
+            ) and self._is_definitely_numeric_expression(right)
+        return False
 
 
 class OperationFlipOperatorModifier(JavaProceduralModifier):
@@ -274,28 +311,50 @@ class OperationChangeConstantsModifier(JavaProceduralModifier):
         target = random.choice(candidates)
         original = code[target.start_byte : target.end_byte]
 
-        try:
-            if "." in original:
-                value = float(original)
-                new_value = value + random.choice([-1.0, 1.0, -0.1, 0.1])
-            else:
-                value = int(original, 0)  # Handles hex, octal, etc.
-                new_value = value + random.choice([-1, 1, -10, 10])
-
-            return code[: target.start_byte] + str(new_value) + code[target.end_byte :]
-        except (ValueError, OverflowError):
+        replacement = self._mutate_numeric_literal(original, target.type)
+        if replacement is None:
             return code
+        return code[: target.start_byte] + replacement + code[target.end_byte :]
+
+    def _mutate_numeric_literal(self, literal: str, literal_type: str) -> str | None:
+        """Mutate Java numeric literals, including long suffixes and hex floats."""
+        cleaned = literal.replace("_", "")
+
+        try:
+            if literal_type in INTEGER_LITERAL_TYPES:
+                suffix = ""
+                core = cleaned
+                if core[-1] in {"l", "L"}:
+                    suffix = core[-1]
+                    core = core[:-1]
+                value = int(core, 0)
+                new_value = value + random.choice([-1, 1, -10, 10])
+                return f"{new_value}{suffix}"
+
+            if literal_type in FLOAT_LITERAL_TYPES:
+                suffix = ""
+                core = cleaned
+                if core[-1] in {"f", "F", "d", "D"}:
+                    suffix = core[-1]
+                    core = core[:-1]
+
+                if literal_type == "hex_floating_point_literal" or core.lower().startswith(
+                    ("0x", "+0x", "-0x")
+                ):
+                    value = float.fromhex(core)
+                else:
+                    value = float(core)
+
+                new_value = value + random.choice([-1.0, 1.0, -0.1, 0.1])
+                return f"{new_value}{suffix}"
+        except (ValueError, OverflowError, IndexError):
+            return None
+
+        return None
 
     def _find_numeric_literals(self, node, candidates):
         """Find numeric literal nodes."""
-        if node.type in [
-            "decimal_integer_literal",
-            "hex_integer_literal",
-            "octal_integer_literal",
-            "binary_integer_literal",
-            "decimal_floating_point_literal",
-            "hex_floating_point_literal",
-        ]:
+        if node.type in NUMERIC_LITERAL_TYPES:
             candidates.append(node)
         for child in node.children:
             self._find_numeric_literals(child, candidates)

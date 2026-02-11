@@ -23,6 +23,13 @@ from swesmith.bug_gen.procedural.java.wrappers import (
         return 0;
     }
 }""",
+        """public void baz() {
+    try (java.io.InputStream in = getStream()) {
+        in.read();
+    } catch (Exception e) {
+        handle(e);
+    }
+}""",
     ],
 )
 def test_remove_try_catch_modifier(tmp_path, src):
@@ -38,12 +45,12 @@ def test_remove_try_catch_modifier(tmp_path, src):
     result = modifier.modify(entities[0])
 
     assert result is not None
-    assert "try" not in result.rewrite or result.rewrite.count("try") < src.count(
-        "try"
-    ), "Expected try block to be removed"
-    assert "catch" not in result.rewrite or result.rewrite.count("catch") < src.count(
-        "catch"
-    ), "Expected catch block to be removed"
+    assert result.rewrite.count("try") < src.count("try"), (
+        "Expected try block to be removed"
+    )
+    assert result.rewrite.count("catch") < src.count("catch"), (
+        "Expected catch block to be removed"
+    )
 
 
 def test_remove_try_catch_no_try(tmp_path):
@@ -93,9 +100,9 @@ def test_remove_null_check_modifier(tmp_path, src):
     result = modifier.modify(entities[0])
 
     assert result is not None
-    assert "null" not in result.rewrite or result.rewrite.count("null") < src.count(
-        "null"
-    ), "Expected null check to be removed"
+    assert result.rewrite.count("null") < src.count("null"), (
+        "Expected null check to be removed"
+    )
 
 
 def test_remove_null_check_no_null(tmp_path):

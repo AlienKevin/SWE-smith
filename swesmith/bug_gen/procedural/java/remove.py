@@ -112,7 +112,7 @@ class RemoveAssignModifier(JavaProceduralModifier):
         while stmt.parent and stmt.parent.type != "block":
             stmt = stmt.parent
 
-        if stmt.type in ["expression_statement", "local_variable_declaration"]:
+        if stmt.type == "expression_statement":
             # Remove the entire statement including the semicolon
             # Also remove the newline if present
             end_byte = stmt.end_byte
@@ -123,9 +123,7 @@ class RemoveAssignModifier(JavaProceduralModifier):
         return code
 
     def _find_assignments(self, node, candidates):
-        """Find assignment expressions (not declarations to avoid undefined variables)."""
-        # Only find reassignments (assignment_expression), not declarations (local_variable_declaration)
-        # This prevents creating undefined variable errors
+        """Find assignment expressions used in reassignment statements."""
         if node.type == "assignment_expression":
             candidates.append(node)
         for child in node.children:

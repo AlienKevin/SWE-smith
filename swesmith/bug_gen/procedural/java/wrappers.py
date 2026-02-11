@@ -67,8 +67,8 @@ class RemoveTryCatchModifier(JavaProceduralModifier):
         )
 
     def _find_try_statements(self, node, results):
-        """Find all try statements."""
-        if node.type == "try_statement":
+        """Find all try/catch constructs, including try-with-resources."""
+        if node.type in {"try_statement", "try_with_resources_statement"}:
             results.append(node)
         for child in node.children:
             self._find_try_statements(child, results)

@@ -1,10 +1,11 @@
 import pytest
 from swesmith.bug_gen.adapters.java import get_entities_from_file_java
 from swesmith.bug_gen.procedural.java.operations import (
+    OperationBreakChainsModifier,
     OperationChangeModifier,
+    OperationChangeConstantsModifier,
     OperationFlipOperatorModifier,
     OperationSwapOperandsModifier,
-    OperationChangeConstantsModifier,
 )
 
 
@@ -12,14 +13,14 @@ from swesmith.bug_gen.procedural.java.operations import (
     "src,possible_results",
     [
         (
-            """public int add(int a, int b) {
-    return a + b;
+            """public int add() {
+    return 1 + 2;
 }""",
             [
-                "return a - b;",
-                "return a * b;",
-                "return a / b;",
-                "return a % b;",
+                "return 1 - 2;",
+                "return 1 * 2;",
+                "return 1 / 2;",
+                "return 1 % 2;",
             ],
         ),
         (
@@ -38,6 +39,34 @@ from swesmith.bug_gen.procedural.java.operations import (
 )
 def test_operation_change_modifier(tmp_path, src, possible_results):
     """Test that OperationChangeModifier changes operations."""
+    test_file = tmp_path / "Test.java"
+    test_file.write_text(src, encoding="utf-8")
+
+    entities = []
+    get_entities_from_file_java(entities, str(test_file))
+    assert len(entities) == 1
+
+    modifier = OperationChangeModifier(likelihood=1.0, seed=42)
+    result = modifier.modify(entities[0])
+
+    assert result is not None
+    assert any(expected in result.rewrite for expected in possible_results), (
+        f"Expected one of {possible_results} in {result.rewrite}"
+    )
+
+
+def test_operation_change_modifier_bitwise_operator(tmp_path):
+    """Test that OperationChangeModifier can change bitwise operators."""
+    src = """public int mask(int a, int b) {
+    return a ^ b;
+}"""
+    possible_results = [
+        "return a & b;",
+        "return a | b;",
+        "return a << b;",
+        "return a >> b;",
+        "return a >>> b;",
+    ]
     test_file = tmp_path / "Test.java"
     test_file.write_text(src, encoding="utf-8")
 
@@ -98,17 +127,23 @@ def test_operation_flip_operator_modifier(tmp_path, src, expected_mapping):
 
 
 @pytest.mark.parametrize(
-    "src",
+    "src,expected",
     [
-        """public int foo(int a, int b) {
+        (
+            """public int foo(int a, int b) {
     return a + b;
 }""",
-        """public boolean bar(int x, int y) {
+            "return b + a;",
+        ),
+        (
+            """public boolean bar(int x, int y) {
     return x < y;
 }""",
+            "return y < x;",
+        ),
     ],
 )
-def test_operation_swap_operands_modifier(tmp_path, src):
+def test_operation_swap_operands_modifier(tmp_path, src, expected):
     """Test that OperationSwapOperandsModifier swaps operands."""
     test_file = tmp_path / "Test.java"
     test_file.write_text(src, encoding="utf-8")
@@ -121,7 +156,7 @@ def test_operation_swap_operands_modifier(tmp_path, src):
     result = modifier.modify(entities[0])
 
     assert result is not None
-    assert result.rewrite != src, "Expected operands to be swapped"
+    assert expected in result.rewrite, f"Expected swapped expression {expected}"
 
 
 @pytest.mark.parametrize(
@@ -155,9 +190,11 @@ def test_operation_change_constants_modifier(tmp_path, src):
 
 
 def test_operation_change_modifier_no_string_concat(tmp_path):
-    """Test that OperationChangeModifier doesn't change string concatenation."""
+    """Test that string concatenation expressions are not selected for mutation."""
     src = """public String foo(String a) {
-    return a + "suffix";
+    String s = a + "suffix";
+    int n = 1 + 2;
+    return s + n;
 }"""
     test_file = tmp_path / "Test.java"
     test_file.write_text(src, encoding="utf-8")
@@ -169,5 +206,83 @@ def test_operation_change_modifier_no_string_concat(tmp_path):
     modifier = OperationChangeModifier(likelihood=1.0, seed=42)
     result = modifier.modify(entities[0])
 
-    # Should return None because we skip string concatenation
-    assert result is None or "+" in result.rewrite
+    assert result is not None
+    assert 'String s = a + "suffix";' in result.rewrite
+    assert "return s + n;" in result.rewrite
+
+
+def test_operation_change_constants_modifier_handles_long_suffix(tmp_path):
+    """Test that long literal suffixes remain valid after mutation."""
+    src = """public long foo() {
+    return 1234L;
+}"""
+    test_file = tmp_path / "Test.java"
+    test_file.write_text(src, encoding="utf-8")
+
+    entities = []
+    get_entities_from_file_java(entities, str(test_file))
+    assert len(entities) == 1
+
+    modifier = OperationChangeConstantsModifier(likelihood=1.0, seed=42)
+    result = modifier.modify(entities[0])
+
+    assert result is not None
+    assert "1234L" not in result.rewrite
+    assert "L;" in result.rewrite
+
+
+def test_operation_change_constants_modifier_handles_hex_float(tmp_path):
+    """Test that hex floating-point literals are mutated without parse failures."""
+    src = """public double foo() {
+    return 0x1.0p3;
+}"""
+    test_file = tmp_path / "Test.java"
+    test_file.write_text(src, encoding="utf-8")
+
+    entities = []
+    get_entities_from_file_java(entities, str(test_file))
+    assert len(entities) == 1
+
+    modifier = OperationChangeConstantsModifier(likelihood=1.0, seed=42)
+    result = modifier.modify(entities[0])
+
+    assert result is not None
+    assert "0x1.0p3" not in result.rewrite
+
+
+def test_operation_break_chains_modifier(tmp_path):
+    """Test that OperationBreakChainsModifier breaks chained method calls."""
+    src = """public String foo(String s) {
+    return s.trim().toLowerCase();
+}"""
+    test_file = tmp_path / "Test.java"
+    test_file.write_text(src, encoding="utf-8")
+
+    entities = []
+    get_entities_from_file_java(entities, str(test_file))
+    assert len(entities) == 1
+
+    modifier = OperationBreakChainsModifier(likelihood=1.0, seed=42)
+    result = modifier.modify(entities[0])
+
+    assert result is not None
+    assert "s.trim().toLowerCase()" not in result.rewrite
+    assert "s.trim()" in result.rewrite
+
+
+def test_operation_break_chains_modifier_no_chain(tmp_path):
+    """Test that OperationBreakChainsModifier returns None when no chains exist."""
+    src = """public int foo() {
+    return 42;
+}"""
+    test_file = tmp_path / "Test.java"
+    test_file.write_text(src, encoding="utf-8")
+
+    entities = []
+    get_entities_from_file_java(entities, str(test_file))
+    assert len(entities) == 1
+
+    modifier = OperationBreakChainsModifier(likelihood=1.0, seed=42)
+    result = modifier.modify(entities[0])
+
+    assert result is None
