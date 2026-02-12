@@ -123,7 +123,9 @@ class RemoveNullCheckModifier(JavaProceduralModifier):
                 return None
 
             if if_body.type == "block":
-                body_content = self._extract_block_content(code_entity.src_code, if_body)
+                body_content = self._extract_block_content(
+                    code_entity.src_code, if_body
+                )
             else:
                 body_content = code_entity.src_code[
                     if_body.start_byte : if_body.end_byte
