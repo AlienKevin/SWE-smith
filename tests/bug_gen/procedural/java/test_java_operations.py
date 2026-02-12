@@ -83,6 +83,27 @@ def test_operation_change_modifier_bitwise_operator(tmp_path):
     )
 
 
+def test_operation_change_modifier_no_string_literal_concat(tmp_path):
+    """Test that string-literal concatenation expressions are not selected."""
+    src = """public String foo(String a) {
+    String s = a + "suffix";
+    int n = 1 + 2;
+    return s + n;
+}"""
+    test_file = tmp_path / "Test.java"
+    test_file.write_text(src, encoding="utf-8")
+
+    entities = []
+    get_entities_from_file_java(entities, str(test_file))
+    assert len(entities) == 1
+
+    modifier = OperationChangeModifier(likelihood=1.0, seed=42)
+    result = modifier.modify(entities[0])
+
+    assert result is not None
+    assert 'String s = a + "suffix";' in result.rewrite
+
+
 @pytest.mark.parametrize(
     "src,expected_mapping",
     [
@@ -187,28 +208,6 @@ def test_operation_change_constants_modifier(tmp_path, src):
 
     assert result is not None
     assert result.rewrite != src, "Expected constant to be changed"
-
-
-def test_operation_change_modifier_no_string_concat(tmp_path):
-    """Test that string concatenation expressions are not selected for mutation."""
-    src = """public String foo(String a) {
-    String s = a + "suffix";
-    int n = 1 + 2;
-    return s + n;
-}"""
-    test_file = tmp_path / "Test.java"
-    test_file.write_text(src, encoding="utf-8")
-
-    entities = []
-    get_entities_from_file_java(entities, str(test_file))
-    assert len(entities) == 1
-
-    modifier = OperationChangeModifier(likelihood=1.0, seed=42)
-    result = modifier.modify(entities[0])
-
-    assert result is not None
-    assert 'String s = a + "suffix";' in result.rewrite
-    assert "return s + n;" in result.rewrite
 
 
 def test_operation_change_constants_modifier_handles_long_suffix(tmp_path):

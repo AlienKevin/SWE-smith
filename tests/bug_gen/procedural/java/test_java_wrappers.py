@@ -127,22 +127,38 @@ def test_remove_null_check_no_null(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "src",
+    "src,expected_condition",
     [
-        """public void foo(String s) {
+        (
+            """public void foo(String s) {
     if (s == null || s.isEmpty()) {
         return;
     }
 }""",
-        """public void foo(String s) {
+            "if (s.isEmpty())",
+        ),
+        (
+            """public void foo(String s) {
     if (s != null && s.length() > 0) {
         System.out.println(s);
     }
 }""",
+            "if (s.length() > 0)",
+        ),
+        (
+            """public void foo(String s) {
+    if (s.length() > 0 && s != null) {
+        System.out.println(s);
+    }
+}""",
+            "if (s.length() > 0)",
+        ),
     ],
 )
-def test_remove_null_check_skips_compound_conditions(tmp_path, src):
-    """Test that compound null-check conditions are skipped."""
+def test_remove_null_check_simplifies_compound_conditions(
+    tmp_path, src, expected_condition
+):
+    """Test that compound null-check conditions are simplified."""
     test_file = tmp_path / "Test.java"
     test_file.write_text(src, encoding="utf-8")
 
@@ -153,4 +169,5 @@ def test_remove_null_check_skips_compound_conditions(tmp_path, src):
     modifier = RemoveNullCheckModifier(likelihood=1.0, seed=42)
     result = modifier.modify(entities[0])
 
-    assert result is None
+    assert result is not None
+    assert expected_condition in result.rewrite

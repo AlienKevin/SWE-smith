@@ -114,47 +114,20 @@ class OperationChangeModifier(JavaProceduralModifier):
             self._find_operations(child, candidates)
 
     def _is_potential_string_concat(self, binary_node) -> bool:
-        """Treat '+' as arithmetic only when both sides are clearly numeric."""
+        """Treat '+' as string concat when either side contains string literals."""
         if len(binary_node.children) < 3:
-            return True
+            return False
         left = binary_node.children[0]
         right = binary_node.children[2]
-        return not (
-            self._is_definitely_numeric_expression(left)
-            and self._is_definitely_numeric_expression(right)
+        return self._contains_string_literal(left) or self._contains_string_literal(
+            right
         )
 
-    def _is_definitely_numeric_expression(self, node) -> bool:
-        """Conservative numeric-expression check used to avoid mutating string concat."""
-        if node.type in NUMERIC_LITERAL_TYPES:
+    def _contains_string_literal(self, node) -> bool:
+        """Return True when subtree contains a string literal."""
+        if node.type == "string_literal":
             return True
-        if node.type == "parenthesized_expression":
-            for child in node.children:
-                if child.type in {"(", ")"}:
-                    continue
-                return self._is_definitely_numeric_expression(child)
-            return False
-        if node.type == "unary_expression":
-            for child in node.children:
-                if child.type in {"+", "-", "++", "--"}:
-                    continue
-                return self._is_definitely_numeric_expression(child)
-            return False
-        if node.type == "binary_expression" and len(node.children) >= 3:
-            operator_node = node.children[1]
-            operator_text = (
-                operator_node.text.decode("utf-8")
-                if hasattr(operator_node, "text")
-                else ""
-            )
-            if operator_text not in ARITHMETIC_OPS:
-                return False
-            left = node.children[0]
-            right = node.children[2]
-            return self._is_definitely_numeric_expression(
-                left
-            ) and self._is_definitely_numeric_expression(right)
-        return False
+        return any(self._contains_string_literal(child) for child in node.children)
 
 
 class OperationFlipOperatorModifier(JavaProceduralModifier):

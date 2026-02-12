@@ -94,45 +94,56 @@ class RemoveNullCheckModifier(JavaProceduralModifier):
         parser = Parser(JAVA_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
 
-        # Find if statements with null checks
-        null_check_ifs = []
-        self._find_null_check_ifs(tree.root_node, code_entity.src_code, null_check_ifs)
+        # Find if statements with removable null checks.
+        null_check_candidates = []
+        self._find_null_check_candidates(
+            tree.root_node, code_entity.src_code, null_check_candidates
+        )
 
-        if not null_check_ifs:
+        if not null_check_candidates:
             return None
 
         # Pick one randomly
-        target = self.rand.choice(null_check_ifs)
-
-        # Find the if body (what gets executed when condition is true)
-        if_body = None
-        for child in target.children:
-            if child.type == "block" or child.type in [
-                "expression_statement",
-                "return_statement",
-                "throw_statement",
-            ]:
-                if_body = child
-                break
-
-        if not if_body:
-            return None
-
-        # Extract the if body content
-        if if_body.type == "block":
-            body_content = self._extract_block_content(code_entity.src_code, if_body)
-        else:
-            body_content = code_entity.src_code[if_body.start_byte : if_body.end_byte]
-
-        if body_content is None:
-            return None
-
-        # Replace the entire if statement with just the body
-        modified_code = (
-            code_entity.src_code[: target.start_byte]
-            + body_content
-            + code_entity.src_code[target.end_byte :]
+        target, condition_node, simplified_condition = self.rand.choice(
+            null_check_candidates
         )
+        if simplified_condition is None:
+            # Standalone null-check if-statements are replaced by their body.
+            if_body = None
+            for child in target.children:
+                if child.type == "block" or child.type in [
+                    "expression_statement",
+                    "return_statement",
+                    "throw_statement",
+                ]:
+                    if_body = child
+                    break
+
+            if not if_body:
+                return None
+
+            if if_body.type == "block":
+                body_content = self._extract_block_content(code_entity.src_code, if_body)
+            else:
+                body_content = code_entity.src_code[
+                    if_body.start_byte : if_body.end_byte
+                ]
+
+            if body_content is None:
+                return None
+
+            modified_code = (
+                code_entity.src_code[: target.start_byte]
+                + body_content
+                + code_entity.src_code[target.end_byte :]
+            )
+        else:
+            # Compound checks keep the if-statement and drop only the null-check part.
+            modified_code = (
+                code_entity.src_code[: condition_node.start_byte]
+                + simplified_condition
+                + code_entity.src_code[condition_node.end_byte :]
+            )
 
         # Validate syntax before returning
         if not self.validate_syntax(code_entity.src_code, modified_code):
@@ -145,10 +156,9 @@ class RemoveNullCheckModifier(JavaProceduralModifier):
             strategy=self.name,
         )
 
-    def _find_null_check_ifs(self, node, code: str, results):
-        """Find if statements with null checks (x != null, x == null)."""
+    def _find_null_check_candidates(self, node, code: str, results):
+        """Find if-statements where null checks can be removed or simplified."""
         if node.type == "if_statement":
-            # Check if condition contains null comparison
             condition_node = None
             for child in node.children:
                 if child.type == "parenthesized_expression":
@@ -160,10 +170,14 @@ class RemoveNullCheckModifier(JavaProceduralModifier):
                     condition_node.start_byte : condition_node.end_byte
                 ]
                 if self._is_simple_null_check(condition_text):
-                    results.append(node)
+                    results.append((node, condition_node, None))
+                else:
+                    simplified = self._simplify_compound_null_check(condition_text)
+                    if simplified is not None:
+                        results.append((node, condition_node, simplified))
 
         for child in node.children:
-            self._find_null_check_ifs(child, code, results)
+            self._find_null_check_candidates(child, code, results)
 
     @staticmethod
     def _is_simple_null_check(condition_text: str) -> bool:
@@ -188,6 +202,49 @@ class RemoveNullCheckModifier(JavaProceduralModifier):
 
         left, right = parts[0].strip(), parts[1].strip()
         return left == "null" or right == "null"
+
+    def _simplify_compound_null_check(self, condition_text: str) -> str | None:
+        """Drop one null-check term from top-level `&&`/`||` conditions."""
+        text = condition_text.strip()
+        if text.startswith("(") and text.endswith(")"):
+            text = text[1:-1].strip()
+
+        split = self._split_top_level_logical(text)
+        if split is None:
+            return None
+
+        left, _, right = split
+        left_is_null_check = self._is_simple_null_check(f"({left})")
+        right_is_null_check = self._is_simple_null_check(f"({right})")
+
+        if left_is_null_check == right_is_null_check:
+            return None
+
+        remaining = right if left_is_null_check else left
+        remaining = remaining.strip()
+        if not remaining:
+            return None
+        return f"({remaining})"
+
+    @staticmethod
+    def _split_top_level_logical(condition_text: str):
+        """Split top-level binary logical expressions into (left, op, right)."""
+        depth = 0
+        i = 0
+        while i < len(condition_text) - 1:
+            char = condition_text[i]
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            elif depth == 0 and condition_text[i : i + 2] in {"&&", "||"}:
+                left = condition_text[:i].strip()
+                op = condition_text[i : i + 2]
+                right = condition_text[i + 2 :].strip()
+                if left and right:
+                    return left, op, right
+            i += 1
+        return None
 
     def _extract_block_content(self, code: str, block_node):
         """Extract content inside block braces."""
