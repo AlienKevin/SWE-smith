@@ -2,8 +2,6 @@
 Return-related procedural modifications for Java code.
 """
 
-import random
-
 import tree_sitter_java as tsjava
 from tree_sitter import Language, Parser
 
@@ -54,7 +52,7 @@ class ReturnNullModifier(JavaProceduralModifier):
         if not candidates:
             return code
 
-        target = random.choice(candidates)
+        target = self.rand.choice(candidates)
         return_expr = None
         for child in target.children:
             if child.type not in {"return", ";"}:

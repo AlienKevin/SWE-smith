@@ -2,8 +2,6 @@
 Boolean-related procedural modifications for Java code.
 """
 
-import random
-
 import tree_sitter_java as tsjava
 from tree_sitter import Language, Parser
 
@@ -46,7 +44,7 @@ class BooleanNegateModifier(JavaProceduralModifier):
         if not candidates:
             return code
 
-        target = random.choice(candidates)
+        target = self.rand.choice(candidates)
         original_text = code[target.start_byte : target.end_byte]
 
         # Negate the boolean

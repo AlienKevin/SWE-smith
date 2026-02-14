@@ -2,8 +2,6 @@
 Removal-related procedural modifications for Java code.
 """
 
-import random
-
 import tree_sitter_java as tsjava
 from tree_sitter import Language, Parser
 
@@ -47,7 +45,7 @@ class RemoveConditionalModifier(JavaProceduralModifier):
         if not candidates:
             return code
 
-        target = random.choice(candidates)
+        target = self.rand.choice(candidates)
 
         # Find the if body
         body = None
@@ -105,7 +103,7 @@ class RemoveAssignModifier(JavaProceduralModifier):
         if not candidates:
             return code
 
-        target = random.choice(candidates)
+        target = self.rand.choice(candidates)
 
         # Find the statement containing this assignment
         stmt = target

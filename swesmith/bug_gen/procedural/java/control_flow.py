@@ -2,8 +2,6 @@
 Control flow-related procedural modifications for Java code.
 """
 
-import random
-
 import tree_sitter_java as tsjava
 from tree_sitter import Language, Parser
 
@@ -50,7 +48,7 @@ class ControlIfElseInvertModifier(JavaProceduralModifier):
         if not candidates:
             return code
 
-        target = random.choice(candidates)
+        target = self.rand.choice(candidates)
 
         # Extract components
         condition = None
