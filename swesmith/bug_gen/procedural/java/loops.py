@@ -25,6 +25,9 @@ class LoopBreakContinueSwapModifier(JavaProceduralModifier):
     conditions = [CodeProperty.IS_FUNCTION, CodeProperty.HAS_LOOP]
 
     def modify(self, code_entity: CodeEntity) -> BugRewrite | None:
+        if not self.flip():
+            return None
+
         parser = Parser(JAVA_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
 
@@ -99,6 +102,9 @@ class LoopOffByOneModifier(JavaProceduralModifier):
     conditions = [CodeProperty.IS_FUNCTION, CodeProperty.HAS_LOOP]
 
     def modify(self, code_entity: CodeEntity) -> BugRewrite | None:
+        if not self.flip():
+            return None
+
         parser = Parser(JAVA_LANGUAGE)
         tree = parser.parse(bytes(code_entity.src_code, "utf8"))
 

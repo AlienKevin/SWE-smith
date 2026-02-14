@@ -2,14 +2,12 @@
 Operation-related procedural modifications for Java code.
 """
 
-import random
-
 import tree_sitter_java as tsjava
 from tree_sitter import Language, Parser
 
 from swesmith.bug_gen.procedural.base import CommonPMs
 from swesmith.bug_gen.procedural.java.base import JavaProceduralModifier
-from swesmith.constants import BugRewrite, CodeEntity
+from swesmith.constants import BugRewrite, CodeEntity, CodeProperty
 
 JAVA_LANGUAGE = Language(tsjava.language())
 
@@ -74,23 +72,23 @@ class OperationChangeModifier(JavaProceduralModifier):
             return code
 
         # Select a random operation to change
-        target = random.choice(candidates)
+        target = self.rand.choice(candidates)
         operator_text = code[target.start_byte : target.end_byte]
 
         # Choose a replacement from the same category
         replacement = None
         if operator_text in ARITHMETIC_OPS:
             ops = list(ARITHMETIC_OPS - {operator_text})
-            replacement = random.choice(ops) if ops else None
+            replacement = self.rand.choice(ops) if ops else None
         elif operator_text in COMPARISON_OPS:
             ops = list(COMPARISON_OPS - {operator_text})
-            replacement = random.choice(ops) if ops else None
+            replacement = self.rand.choice(ops) if ops else None
         elif operator_text in LOGICAL_OPS:
             ops = list(LOGICAL_OPS - {operator_text})
-            replacement = random.choice(ops) if ops else None
+            replacement = self.rand.choice(ops) if ops else None
         elif operator_text in BITWISE_OPS:
             ops = list(BITWISE_OPS - {operator_text})
-            replacement = random.choice(ops) if ops else None
+            replacement = self.rand.choice(ops) if ops else None
 
         if replacement:
             return code[: target.start_byte] + replacement + code[target.end_byte :]
@@ -163,7 +161,7 @@ class OperationFlipOperatorModifier(JavaProceduralModifier):
         if not candidates:
             return code
 
-        target = random.choice(candidates)
+        target = self.rand.choice(candidates)
         operator_text = code[target.start_byte : target.end_byte]
 
         if operator_text in FLIPPED_OPERATORS:
@@ -216,7 +214,7 @@ class OperationSwapOperandsModifier(JavaProceduralModifier):
         if not candidates:
             return code
 
-        target = random.choice(candidates)
+        target = self.rand.choice(candidates)
         if len(target.children) >= 3:
             left = target.children[0]
             right = target.children[2]
@@ -281,7 +279,7 @@ class OperationChangeConstantsModifier(JavaProceduralModifier):
         if not candidates:
             return code
 
-        target = random.choice(candidates)
+        target = self.rand.choice(candidates)
         original = code[target.start_byte : target.end_byte]
 
         replacement = self._mutate_numeric_literal(original, target.type)
@@ -301,7 +299,7 @@ class OperationChangeConstantsModifier(JavaProceduralModifier):
                     suffix = core[-1]
                     core = core[:-1]
                 value = int(core, 0)
-                new_value = value + random.choice([-1, 1, -10, 10])
+                new_value = value + self.rand.choice([-1, 1, -10, 10])
                 return f"{new_value}{suffix}"
 
             if literal_type in FLOAT_LITERAL_TYPES:
@@ -319,7 +317,7 @@ class OperationChangeConstantsModifier(JavaProceduralModifier):
                 else:
                     value = float(core)
 
-                new_value = value + random.choice([-1.0, 1.0, -0.1, 0.1])
+                new_value = value + self.rand.choice([-1.0, 1.0, -0.1, 0.1])
                 return f"{new_value}{suffix}"
         except (ValueError, OverflowError, IndexError):
             return None
@@ -339,7 +337,7 @@ class OperationBreakChainsModifier(JavaProceduralModifier):
 
     explanation: str = CommonPMs.OPERATION_BREAK_CHAINS.explanation
     name: str = CommonPMs.OPERATION_BREAK_CHAINS.name
-    conditions: list = CommonPMs.OPERATION_BREAK_CHAINS.conditions
+    conditions: list = [CodeProperty.IS_FUNCTION, CodeProperty.HAS_FUNCTION_CALL]
 
     def modify(self, code_entity: CodeEntity) -> BugRewrite | None:
         if not self.flip():
@@ -367,7 +365,7 @@ class OperationBreakChainsModifier(JavaProceduralModifier):
         if not candidates:
             return code
 
-        target = random.choice(candidates)
+        target = self.rand.choice(candidates)
         # Remove one method call from the chain
         if len(target.children) >= 2:
             # Keep just the first part
