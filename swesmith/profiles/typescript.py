@@ -50,22 +50,22 @@ class TypeScriptProfile(RepoProfile):
         )
 
 
-def default_npm_install_dockerfile(mirror_name: str, node_version: str = "20") -> str:
+def default_npm_install_dockerfile(mirror_url: str, node_version: str = "20") -> str:
     """Default Dockerfile for TypeScript projects using npm."""
     return f"""FROM node:{node_version}-bullseye
 RUN apt update && apt install -y git
-RUN git clone https://github.com/{mirror_name} /{ENV_NAME}
+RUN git clone {mirror_url} /{ENV_NAME}
 WORKDIR /{ENV_NAME}
 RUN npm install
 """
 
 
-def default_pnpm_install_dockerfile(mirror_name: str, node_version: str = "20") -> str:
+def default_pnpm_install_dockerfile(mirror_url: str, node_version: str = "20") -> str:
     """Default Dockerfile for TypeScript projects using pnpm."""
     return f"""FROM node:{node_version}-bullseye
 RUN apt update && apt install -y git
 RUN npm install -g pnpm
-RUN git clone https://github.com/{mirror_name} /{ENV_NAME}
+RUN git clone {mirror_url} /{ENV_NAME}
 WORKDIR /{ENV_NAME}
 RUN pnpm install
 """

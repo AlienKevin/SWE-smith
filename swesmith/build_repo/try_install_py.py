@@ -113,9 +113,10 @@ def main(
     base_cwd = os.getcwd()
     try:
         # Shallow clone repository at the specified commit
+        p._configure_ssh_env()
         if not os.path.exists(p.repo):
             subprocess.run(
-                f"git clone https://github.com/{p.owner}/{p.repo}.git",
+                f"git clone {p._source_read_url}",
                 check=True,
                 shell=True,
                 stdout=subprocess.DEVNULL,
@@ -205,7 +206,7 @@ def main(
                 "\n".join(
                     [
                         "#!/bin/bash\n",
-                        f"git clone git@github.com:{p.owner}/{p.repo}.git",
+                        f"git clone {p._source_read_url}",
                         f"git checkout {p.commit}",
                     ]
                     + install_lines
