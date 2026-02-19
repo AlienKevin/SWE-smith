@@ -551,7 +551,7 @@ class Waybard527ccd4(CppProfile):
     owner: str = "Alexays"
     repo: str = "Waybar"
     commit: str = "d527ccd4c1f53f4bb161677b451aabb89556f2d5"
-    test_cmd: str = "meson test -C build --verbose"
+    test_cmd: str = "meson compile -C build && meson test -C build --verbose"
 
     @property
     def dockerfile(self):
@@ -611,7 +611,10 @@ class FTXUIf73d92d3(CppProfile):
     owner: str = "ArthurSonzogni"
     repo: str = "FTXUI"
     commit: str = "f73d92d31f5efeccadfb7081edadbc070ef42f73"
-    test_cmd: str = "cd build && ./ftxui-tests --gtest_color=no"
+    test_cmd: str = "cd build && cmake --build . -j4 && ./ftxui-tests --gtest_color=no"
+    bug_gen_dirs_exclude: list[str] = field(
+        default_factory=lambda: [*DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE, "/bazel"]
+    )
 
     @property
     def dockerfile(self):
@@ -644,7 +647,22 @@ class LibreCAD7a288fff(CppProfile):
     owner: str = "LibreCAD"
     repo: str = "LibreCAD"
     commit: str = "7a288ffff76215dea36c3bc4794765ccb85d1a06"
-    test_cmd: str = "cd build && ./librecad_tests"
+    test_cmd: str = "cd build && cmake --build . -j4 && ./librecad_tests"
+    bug_gen_dirs_exclude: list[str] = field(
+        default_factory=lambda: [
+            *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
+            "/CI",
+            "/ChangeLogs",
+            "/desktop",
+            "/externals",
+            "/libraries",
+            "/licenses",
+            "/plugins",
+            "/librecad/src/actions",
+            "/librecad/src/main",
+            "/librecad/src/ui",
+        ]
+    )
 
     @property
     def dockerfile(self):
@@ -752,7 +770,7 @@ class Magicenumc1aa6de9(CppProfile):
     owner: str = "Neargye"
     repo: str = "magic_enum"
     commit: str = "c1aa6de965960250f4ab762e97e67e6290395dc7"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -785,7 +803,7 @@ class OpenRCT2f228d738(CppProfile):
     owner: str = "OpenRCT2"
     repo: str = "OpenRCT2"
     commit: str = "f228d738155b06f13156af70ec6560db97b1b2cb"
-    test_cmd: str = "cd build && ./openrct2-cli scan-objects && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ./openrct2-cli scan-objects && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -850,7 +868,7 @@ class OpenTTDae80a47c(CppProfile):
     owner: str = "OpenTTD"
     repo: str = "OpenTTD"
     commit: str = "ae80a47c7db48e543d9a9ebc682df1a889661d2a"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure"
 
     @property
     def dockerfile(self):
@@ -897,7 +915,7 @@ class Qv2rayd5c5aeb3(CppProfile):
     owner: str = "Qv2ray"
     repo: str = "Qv2ray"
     commit: str = "d5c5aeb366e2fbe9c9243648af36b0d11da14920"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -949,7 +967,7 @@ class Rapidjson24b5e7a8(CppProfile):
     owner: str = "Tencent"
     repo: str = "rapidjson"
     commit: str = "24b5e7a8b27f42fa16b96fc70aade9106cf7102f"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -978,7 +996,7 @@ class WasmEdgecb41f751(CppProfile):
     owner: str = "WasmEdge"
     repo: str = "WasmEdge"
     commit: str = "cb41f751daac037b61ebf9df3bb3fcbcf625edb4"
-    test_cmd: str = 'export LD_LIBRARY_PATH="/app/build/lib/api:$LD_LIBRARY_PATH" && cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1'
+    test_cmd: str = 'export LD_LIBRARY_PATH="/app/build/lib/api:$LD_LIBRARY_PATH" && cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1'
 
     @property
     def dockerfile(self):
@@ -1033,7 +1051,7 @@ class ImHexf4768420(CppProfile):
     owner: str = "WerWolv"
     repo: str = "ImHex"
     commit: str = "f4768420087f27fc9f40a41b028529b2f0efd6e3"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure"
 
     @property
     def dockerfile(self):
@@ -1098,7 +1116,7 @@ class Albert897c7797(CppProfile):
     owner: str = "albertlauncher"
     repo: str = "albert"
     commit: str = "897c77979d55fdfaba23babddc91fbe841ee7a3e"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -1152,7 +1170,7 @@ class Brpcd22fa17f(CppProfile):
     owner: str = "apache"
     repo: str = "brpc"
     commit: str = "d22fa17f09514ed42e7b15e0a439827dc8310a8e"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -1206,7 +1224,7 @@ class Aria2b4fd7cb1(CppProfile):
     owner: str = "aria2"
     repo: str = "aria2"
     commit: str = "b4fd7cb1ca03e38ad9d7ab9308b8200cb1d41c25"
-    test_cmd: str = "cd test && ./aria2c"
+    test_cmd: str = "cd build && make -j$(nproc) && cd ../test && ./aria2c"
 
     @property
     def dockerfile(self):
@@ -1279,7 +1297,7 @@ class Btopabcb906c(CppProfile):
     owner: str = "aristocratos"
     repo: str = "btop"
     commit: str = "abcb906c951d1e79ccc1c03d219f55d2e5c52655"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -1311,7 +1329,7 @@ class Libtorrentf0f8a352(CppProfile):
     owner: str = "arvidn"
     repo: str = "libtorrent"
     commit: str = "f0f8a352cc9eb1bb8936f0b985d20867580c6463"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1 -j$(nproc)"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1 -j$(nproc)"
 
     @property
     def dockerfile(self):
@@ -1359,7 +1377,7 @@ class Asepriteda0d3228(CppProfile):
     owner: str = "aseprite"
     repo: str = "aseprite"
     commit: str = "da0d3228599580ec4bc447bab303751a51c09d9a"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -1405,7 +1423,7 @@ class Retdec8be53bbd(CppProfile):
     owner: str = "avast"
     repo: str = "retdec"
     commit: str = "8be53bbd3d2cd0f550c0e98d3b31d9ee1366f304"
-    test_cmd: str = 'find build/tests -name "retdec-tests-*" -type f -executable -exec {} --gtest_color=no \\;'
+    test_cmd: str = 'cd build && cmake --build . -j4 && cd /app && find build/tests -name "retdec-tests-*" -type f -executable -exec {} --gtest_color=no \\;'
 
     @property
     def dockerfile(self):
@@ -1450,7 +1468,7 @@ class Azahar37e688f8(CppProfile):
     owner: str = "azahar-emu"
     repo: str = "azahar"
     commit: str = "37e688f82d42917a8d232b8e9b49ecee814846b4"
-    test_cmd: str = "find . -name tests -type f -executable -exec {} \\;"
+    test_cmd: str = "cd build && cmake --build . -j4 && cd /app && find . -name tests -type f -executable -exec {} \\;"
 
     @property
     def dockerfile(self):
@@ -1502,7 +1520,7 @@ class Azerothcorewotlk3ffbbe98(CppProfile):
     owner: str = "azerothcore"
     repo: str = "azerothcore-wotlk"
     commit: str = "3ffbbe981f9a94377b6e13761da45fdd405448d9"
-    test_cmd: str = "cd build && ./src/test/unit_tests --gtest_color=no"
+    test_cmd: str = "cd build && cmake --build . -j4 && ./src/test/unit_tests --gtest_color=no"
 
     @property
     def dockerfile(self):
@@ -1548,7 +1566,10 @@ class ArduinoJsonaa7fbd6c(CppProfile):
     owner: str = "bblanchon"
     repo: str = "ArduinoJson"
     commit: str = "aa7fbd6c8be280121cf57044ef986da7353ffd67"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    bug_gen_dirs_exclude: list[str] = field(
+        default_factory=lambda: [*DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE, "/extras"]
+    )
 
     @property
     def dockerfile(self):
@@ -1575,7 +1596,7 @@ class Conky4f829244(CppProfile):
     owner: str = "brndnmtthws"
     repo: str = "conky"
     commit: str = "4f8292449ae8c1a0a6138f2bfe2ebc5368221633"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -1639,7 +1660,18 @@ class Cuberite7fd3fa5c(CppProfile):
     owner: str = "cuberite"
     repo: str = "cuberite"
     commit: str = "7fd3fa5c9345a3f1b949c0988c4849db00a68486"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    bug_gen_dirs_exclude: list[str] = field(
+        default_factory=lambda: [
+            *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
+            "/CMake",
+            "/Server",
+            "/Tools",
+            "/android",
+            "/dev-docs",
+            "/lib",
+        ]
+    )
 
     @property
     def dockerfile(self):
@@ -1676,7 +1708,25 @@ class Cppcheck67606e6e(CppProfile):
     owner: str = "danmar"
     repo: str = "cppcheck"
     commit: str = "67606e6ee50aaefa3ba6c312c644b8b962d7d9da"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    bug_gen_dirs_exclude: list[str] = field(
+        default_factory=lambda: [
+            *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
+            "/addons",
+            "/cfg",
+            "/democlient",
+            "/externals",
+            "/gui",
+            "/htmlreport",
+            "/oss-fuzz",
+            "/platforms",
+            "/rules",
+            "/samples",
+            "/snap",
+            "/valgrind",
+            "/win_installer",
+        ]
+    )
 
     @property
     def dockerfile(self):
@@ -1715,7 +1765,7 @@ class DevilutionXafdaa2ac(CppProfile):
     owner: str = "diasurgical"
     repo: str = "DevilutionX"
     commit: str = "afdaa2ac5e8e92830e8dac5be1976ea42ae67434"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -1770,7 +1820,7 @@ class Doctest1da23a3e(CppProfile):
     owner: str = "doctest"
     repo: str = "doctest"
     commit: str = "1da23a3e8119ec5cce4f9388e91b065e20bf06f5"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -1803,7 +1853,7 @@ class Doxygencbd8c4bc(CppProfile):
     owner: str = "doxygen"
     repo: str = "doxygen"
     commit: str = "cbd8c4bcf0ebb58651fefbfbf9142a92e0a26a2f"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure"
 
     @property
     def dockerfile(self):
@@ -1840,7 +1890,7 @@ class Dragonfly14103bde(CppProfile):
     owner: str = "dragonflydb"
     repo: str = "dragonfly"
     commit: str = "14103bde242967fa55dea98d08391640c12cd4db"
-    test_cmd: str = "cd build-opt && ctest --verbose --output-on-failure"
+    test_cmd: str = "cd build-opt && cmake --build . -j4 && ctest --verbose --output-on-failure"
 
     @property
     def dockerfile(self):
@@ -1886,7 +1936,18 @@ class Drogon34955222(CppProfile):
     owner: str = "drogonframework"
     repo: str = "drogon"
     commit: str = "3495522200664bfef150257157c30aa076188a79"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    bug_gen_dirs_exclude: list[str] = field(
+        default_factory=lambda: [
+            *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
+            "/cmake_modules",
+            "/docker",
+            "/drogon_ctl",
+            "/nosql_lib",
+            "/orm_lib",
+            "/third_party",
+        ]
+    )
 
     @property
     def dockerfile(self):
@@ -1938,7 +1999,7 @@ class Duckdbcb9e7c21(CppProfile):
     owner: str = "duckdb"
     repo: str = "duckdb"
     commit: str = "cb9e7c2193963670f358682fb369c17ead60e90c"
-    test_cmd: str = './build/test/unittest "[common]" -s'
+    test_cmd: str = 'cd build && cmake --build . -j4 && ./test/unittest "[common]" -s'
 
     @property
     def dockerfile(self):
@@ -1973,7 +2034,7 @@ class Endlesskyf1dba50f(CppProfile):
     owner: str = "endless-sky"
     repo: str = "endless-sky"
     commit: str = "f1dba50fe4cd22bd5ed51dc601203c9f62cd9164"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -2005,7 +2066,14 @@ class Falco43aaffc4(CppProfile):
     owner: str = "falcosecurity"
     repo: str = "falco"
     commit: str = "43aaffc4e05a62f6f29d719a1dee51a5ccc3856d"
-    test_cmd: str = "cd build && ./unit_tests/falco_unit_tests"
+    test_cmd: str = "cd build && cmake --build . -j4 && ./unit_tests/falco_unit_tests"
+    bug_gen_dirs_exclude: list[str] = field(
+        default_factory=lambda: [
+            *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
+            "/submodules",
+            "/unit_tests",
+        ]
+    )
 
     @property
     def dockerfile(self):
@@ -2055,7 +2123,7 @@ class Spdlog472945ba(CppProfile):
     owner: str = "gabime"
     repo: str = "spdlog"
     commit: str = "472945ba489e3f5684761affc431ae532ab5ed8c"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -2082,7 +2150,7 @@ class Ggwave3b877d07(CppProfile):
     owner: str = "ggerganov"
     repo: str = "ggwave"
     commit: str = "3b877d07b102d8242a3fa9f333bddde464848f1b"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -2114,7 +2182,10 @@ class Benchmarkeed8f5c6(CppProfile):
     owner: str = "google"
     repo: str = "benchmark"
     commit: str = "eed8f5c682ed70d596b2b07c68b1588ecab3b24a"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    bug_gen_dirs_exclude: list[str] = field(
+        default_factory=lambda: [*DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE, "/bazel", "/bindings"]
+    )
 
     @property
     def dockerfile(self):
@@ -2152,7 +2223,7 @@ class Bloatya277a440(CppProfile):
     owner: str = "google"
     repo: str = "bloaty"
     commit: str = "a277a440f906729cd69894ca8ceb9b7144eb7f42"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -2193,7 +2264,13 @@ class Dracob91aa918(CppProfile):
     test_cmd: str = "cd build && make -j$(nproc) && ./draco_tests --gtest_color=no"
     timeout: int = 300
     bug_gen_dirs_exclude: list[str] = field(
-        default_factory=lambda: [*DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE, "/third_party"]
+        default_factory=lambda: [
+            *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
+            "/third_party",
+            "/javascript",
+            "/maya",
+            "/unity",
+        ]
     )
     bug_gen_files_exclude: list[str] = field(
         default_factory=lambda: list(DRACO_B91AA918_BUG_GEN_FILES_EXCLUDE)
@@ -2230,7 +2307,10 @@ class Glog53d58e45(CppProfile):
     owner: str = "google"
     repo: str = "glog"
     commit: str = "53d58e4531c7c90f71ddab503d915e027432447a"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    bug_gen_dirs_exclude: list[str] = field(
+        default_factory=lambda: [*DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE, "/.bazelci", "/bazel"]
+    )
 
     @property
     def dockerfile(self):
@@ -2264,7 +2344,10 @@ class Googletest5a9c3f9e(CppProfile):
     owner: str = "google"
     repo: str = "googletest"
     commit: str = "5a9c3f9e8d9b90bbbe8feb32902146cb8f7c1757"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    bug_gen_dirs_exclude: list[str] = field(
+        default_factory=lambda: [*DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE, "/ci", "/googlemock"]
+    )
 
     @property
     def dockerfile(self):
@@ -2296,7 +2379,7 @@ class Highway224b014b(CppProfile):
     repo: str = "highway"
     commit: str = "224b014b1e6ebd1b9c1e134ebb5fbce899844c79"
     test_cmd: str = (
-        "cd build && ctest --verbose --output-on-failure -j $(nproc) --timeout 300"
+        "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure -j $(nproc) --timeout 300"
     )
 
     @property
@@ -2332,7 +2415,7 @@ class Leveldbac691084(CppProfile):
     owner: str = "google"
     repo: str = "leveldb"
     commit: str = "ac691084fdc5546421a55b25e7653d450e5a25fb"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -2365,7 +2448,7 @@ class Sentencepiece0f4ca43a(CppProfile):
     owner: str = "google"
     repo: str = "sentencepiece"
     commit: str = "0f4ca43a084fac098420afc110d81e2c23cf1dc3"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -2401,7 +2484,7 @@ class Snappyda459b52(CppProfile):
     owner: str = "google"
     repo: str = "snappy"
     commit: str = "da459b5263676ccf0dc65a3fcf93fb876e09baac"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -2437,7 +2520,16 @@ class Gperftoolsa4724315(CppProfile):
     owner: str = "gperftools"
     repo: str = "gperftools"
     commit: str = "a47243150ec41097602730ff8779fafcc172d1fb"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    bug_gen_dirs_exclude: list[str] = field(
+        default_factory=lambda: [
+            *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
+            "/generic-config",
+            "/m4",
+            "/vendor",
+            "/vsprojects",
+        ]
+    )
 
     @property
     def dockerfile(self):
@@ -2526,7 +2618,7 @@ class Halidec2a6e34e(CppProfile):
     owner: str = "halide"
     repo: str = "Halide"
     commit: str = "c2a6e34e7f3cff6657de1a85e8bc0e82fd545003"
-    test_cmd: str = 'cd build && ctest -R "^_test_internal$" --verbose'
+    test_cmd: str = 'cd build && cmake --build . -j4 && ctest -R "^_test_internal$" --verbose'
 
     @property
     def dockerfile(self):
@@ -2584,7 +2676,7 @@ class Inputleap34a34fb2(CppProfile):
     owner: str = "input-leap"
     repo: str = "input-leap"
     commit: str = "34a34fb20b93113a6b26052cb5a54f9be2327775"
-    test_cmd: str = "cd /app/build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd /app/build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -2631,7 +2723,10 @@ class Yamlcpp2e6383d2(CppProfile):
     owner: str = "jbeder"
     repo: str = "yaml-cpp"
     commit: str = "2e6383d272f676e1ad28ae5c47016045cbaff938"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    bug_gen_dirs_exclude: list[str] = field(
+        default_factory=lambda: [*DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE, "/util"]
+    )
 
     @property
     def dockerfile(self):
@@ -2732,7 +2827,7 @@ class QuantLiba05b6ab3(CppProfile):
     owner: str = "lballabio"
     repo: str = "QuantLib"
     commit: str = "a05b6ab328ca7c01063d8209fcfb9e54a0eecf0b"
-    test_cmd: str = "cd build/test-suite && ./quantlib-test-suite --log_level=all --report_level=detailed"
+    test_cmd: str = "cd build && cmake --build . -j4 && ./test-suite/quantlib-test-suite --log_level=all --report_level=detailed"
 
     @property
     def dockerfile(self):
@@ -2771,7 +2866,15 @@ class Ledger920059e6(CppProfile):
     owner: str = "ledger"
     repo: str = "ledger"
     commit: str = "920059e6a4a9fbb7ccb9e2cbd6e8a8a06648c113"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    bug_gen_dirs_exclude: list[str] = field(
+        default_factory=lambda: [
+            *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
+            "/contrib",
+            "/lib",
+            "/python",
+        ]
+    )
 
     @property
     def dockerfile(self):
@@ -2828,7 +2931,7 @@ class Stablediffusioncppf0f641a1(CppProfile):
     owner: str = "leejet"
     repo: str = "stable-diffusion.cpp"
     commit: str = "f0f641a142705798d5064ffd3808165d75723344"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -2864,7 +2967,7 @@ class Tinyxml23324d04d(CppProfile):
     owner: str = "leethomason"
     repo: str = "tinyxml2"
     commit: str = "3324d04d58de9d5db09327db6442f075e519f11b"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -2893,7 +2996,7 @@ class Cpr22a41e60(CppProfile):
     owner: str = "libcpr"
     repo: str = "cpr"
     commit: str = "22a41e60836f2207bf54131e6ef7752009ec31e1"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -2920,7 +3023,7 @@ class Luantifc363085(CppProfile):
     owner: str = "luanti-org"
     repo: str = "luanti"
     commit: str = "fc363085dd46330908b3a485dbe5bd7adfcc91b8"
-    test_cmd: str = "./bin/luanti --run-unittests"
+    test_cmd: str = "cmake --build build -j4 && ./bin/luanti --run-unittests"
 
     @property
     def dockerfile(self):
@@ -2977,7 +3080,16 @@ class Luau54a2ea00(CppProfile):
     owner: str = "luau-lang"
     repo: str = "luau"
     commit: str = "54a2ea00831df4c791e6cfc896a98da75d1ae126"
-    test_cmd: str = "./build/Luau.UnitTest --reporters=console --no-colors"
+    test_cmd: str = "cmake --build build -j4 && ./build/Luau.UnitTest --reporters=console --no-colors"
+    bug_gen_dirs_exclude: list[str] = field(
+        default_factory=lambda: [
+            *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
+            "/CLI",
+            "/Require",
+            "/extern",
+            "/fuzz",
+        ]
+    )
 
     @property
     def dockerfile(self):
@@ -3004,7 +3116,7 @@ class AirSim13448700(CppProfile):
     owner: str = "microsoft"
     repo: str = "AirSim"
     commit: str = "13448700ec2b36d6aad7a4e0909bc9daf9d3d931"
-    test_cmd: str = "echo '[==========] Running 1 test'; ./build_release/output/bin/AirLibUnitTests || true; echo '[  PASSED  ] AirLibUnitTests.Main'"
+    test_cmd: str = "cmake --build build_release -j4 && echo '[==========] Running 1 test'; ./build_release/output/bin/AirLibUnitTests || true; echo '[  PASSED  ] AirLibUnitTests.Main'"
 
     @property
     def dockerfile(self):
@@ -3066,7 +3178,7 @@ class GSL756c91ab(CppProfile):
     owner: str = "microsoft"
     repo: str = "GSL"
     commit: str = "756c91ab895aa52f650599bb1a3fc131f1f4b5ef"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -3100,7 +3212,7 @@ class Magnumf3a4ce7d(CppProfile):
     owner: str = "mosra"
     repo: str = "magnum"
     commit: str = "f3a4ce7d1d0cd8085d4f05811c378813ada3cfcc"
-    test_cmd: str = "export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH && cd build && ctest --verbose --output-on-failure"
+    test_cmd: str = "export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH && cd build && cmake --build . -j4 && ctest --verbose --output-on-failure"
 
     @property
     def dockerfile(self):
@@ -3147,7 +3259,7 @@ class Mumble997ecba9(CppProfile):
     owner: str = "mumble-voip"
     repo: str = "mumble"
     commit: str = "997ecba92c7314d9b8964c50a0621230694bbf85"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -3222,6 +3334,9 @@ class Ninjacc60300a(CppProfile):
     repo: str = "ninja"
     commit: str = "cc60300ab94dae9bb28fece3c9b7c397235b17de"
     test_cmd: str = "cd build && make -j$(nproc) && ./ninja_test"
+    bug_gen_dirs_exclude: list[str] = field(
+        default_factory=lambda: [*DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE, "/misc", "/windows"]
+    )
 
     @property
     def dockerfile(self):
@@ -3253,7 +3368,7 @@ class Oatppf83d648f(CppProfile):
     owner: str = "oatpp"
     repo: str = "oatpp"
     commit: str = "f83d648fd82dc222ef88aabbafb68efbd7d7bf50"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -3279,7 +3394,7 @@ class Jsoncppe799ca05(CppProfile):
     owner: str = "open-source-parsers"
     repo: str = "jsoncpp"
     commit: str = "e799ca052df0f859d8d4133211344581c211b925"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -3308,7 +3423,19 @@ class OpenMVGc76d8724(CppProfile):
     owner: str = "openMVG"
     repo: str = "openMVG"
     commit: str = "c76d87244fb3590fb8b9a752be34f07411057ae2"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    bug_gen_dirs_exclude: list[str] = field(
+        default_factory=lambda: [
+            *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
+            "/dist",
+            "/logo",
+            "/src/dependencies",
+            "/src/nonFree",
+            "/src/openMVG_Samples",
+            "/src/software",
+            "/src/third_party",
+        ]
+    )
 
     @property
     def dockerfile(self):
@@ -3365,7 +3492,7 @@ class Opencvaea90a9e(CppProfile):
     repo: str = "opencv"
     commit: str = "aea90a9e314d220dcaa80a616808afc38e1c78b6"
     test_cmd: str = (
-        "cd build && ./bin/opencv_test_core --gtest_color=no --gtest_filter=-*OCL*"
+        "cd build && cmake --build . -j4 && ./bin/opencv_test_core --gtest_color=no --gtest_filter=-*OCL*"
     )
 
     @property
@@ -3423,7 +3550,7 @@ class Srs6e2392f3(CppProfile):
     owner: str = "ossrs"
     repo: str = "srs"
     commit: str = "6e2392f3667512e8c75899dd7d71294785ea0cf7"
-    test_cmd: str = "./objs/srs_utest --gtest_color=no"
+    test_cmd: str = "make -j$(nproc) utest && ./objs/srs_utest --gtest_color=no"
 
     @property
     def dockerfile(self):
@@ -3465,7 +3592,7 @@ class Polybarf99e0b1c(CppProfile):
     owner: str = "polybar"
     repo: str = "polybar"
     commit: str = "f99e0b1c7a5b094f5a04b14101899d0cb4ece69d"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -3532,7 +3659,7 @@ class Recastnavigation13f43344(CppProfile):
     owner: str = "recastnavigation"
     repo: str = "recastnavigation"
     commit: str = "13f433443867c4fb283bf230089b7250d09e331e"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -3569,7 +3696,7 @@ class Seastar7e457cf7(CppProfile):
     repo: str = "seastar"
     commit: str = "7e457cf72dad2987c8fbf8f2382ea712e8bf1c34"
     test_cmd: str = (
-        "cd build/release && ctest --verbose --output-on-failure --repeat until-pass:1"
+        "cd build/release && cmake --build . -j4 && ctest --verbose --output-on-failure --repeat until-pass:1"
     )
 
     @property
@@ -3638,7 +3765,7 @@ class Entte08302e1(CppProfile):
     owner: str = "skypjack"
     repo: str = "entt"
     commit: str = "e08302e169690a40500fe6547209fa82f17f913e"
-    test_cmd: str = "cd build_dir && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build_dir && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -3666,7 +3793,7 @@ class Snapcast439dc886(CppProfile):
     owner: str = "snapcast"
     repo: str = "snapcast"
     commit: str = "439dc88637bb7ac227c24d8ad383e7cdf46a76d7"
-    test_cmd: str = "/app/bin/snapcast_test"
+    test_cmd: str = "cd build && cmake --build . -j4 && /app/bin/snapcast_test"
 
     @property
     def dockerfile(self):
@@ -3715,7 +3842,7 @@ class Sqlitebrowser95f92180(CppProfile):
     owner: str = "sqlitebrowser"
     repo: str = "sqlitebrowser"
     commit: str = "95f92180cd88f7e51f3678fc5133191393edc19d"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -3760,7 +3887,7 @@ class Supercollider438bf480(CppProfile):
     owner: str = "supercollider"
     repo: str = "supercollider"
     commit: str = "438bf480d84af4978a5773fdee05a861ac69136a"
-    test_cmd: str = "export QT_QPA_PLATFORM=offscreen && cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "export QT_QPA_PLATFORM=offscreen && cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -3836,7 +3963,10 @@ class Taskflowd8776bc0(CppProfile):
     owner: str = "taskflow"
     repo: str = "taskflow"
     commit: str = "d8776bc0d3317efbf2c2376006d74a04a6eabf2a"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    bug_gen_dirs_exclude: list[str] = field(
+        default_factory=lambda: [*DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE, "/3rd-party"]
+    )
 
     @property
     def dockerfile(self):
@@ -3870,7 +4000,7 @@ class OneTBB3ebfedd8(CppProfile):
     owner: str = "uxlfoundation"
     repo: str = "oneTBB"
     commit: str = "3ebfedd8638e3bf39db754d458099684488ad8f4"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
 
     @property
     def dockerfile(self):
@@ -3907,7 +4037,7 @@ class Websocketpp4dfe1be7(CppProfile):
     owner: str = "zaphoyd"
     repo: str = "websocketpp"
     commit: str = "4dfe1be74e684acca19ac1cf96cce0df9eac2a2d"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure"
 
     @property
     def dockerfile(self):
@@ -3953,7 +4083,18 @@ class Libzmq51a5a9cb(CppProfile):
     owner: str = "zeromq"
     repo: str = "libzmq"
     commit: str = "51a5a9cbe315ab149357afe063e9e2d41f4c99a8"
-    test_cmd: str = "cd build && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    bug_gen_dirs_exclude: list[str] = field(
+        default_factory=lambda: [
+            *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
+            "/build_qnx",
+            "/builds",
+            "/external",
+            "/m4",
+            "/packaging",
+            "/perf",
+        ]
+    )
 
     @property
     def dockerfile(self):
