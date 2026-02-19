@@ -3221,7 +3221,7 @@ class Ninjacc60300a(CppProfile):
     owner: str = "ninja-build"
     repo: str = "ninja"
     commit: str = "cc60300ab94dae9bb28fece3c9b7c397235b17de"
-    test_cmd: str = "./build/ninja_test"
+    test_cmd: str = "cd build && make -j$(nproc) && ./ninja_test"
 
     @property
     def dockerfile(self):
