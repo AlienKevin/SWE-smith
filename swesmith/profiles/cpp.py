@@ -649,6 +649,7 @@ class LibreCAD7a288fff(CppProfile):
     repo: str = "LibreCAD"
     commit: str = "7a288ffff76215dea36c3bc4794765ccb85d1a06"
     test_cmd: str = "cd build && cmake --build . -j4 && ./librecad_tests"
+    timeout: int = 500
     bug_gen_dirs_exclude: list[str] = field(
         default_factory=lambda: [
             *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
@@ -1568,6 +1569,7 @@ class ArduinoJsonaa7fbd6c(CppProfile):
     repo: str = "ArduinoJson"
     commit: str = "aa7fbd6c8be280121cf57044ef986da7353ffd67"
     test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    timeout: int = 500
     bug_gen_dirs_exclude: list[str] = field(
         default_factory=lambda: [*DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE, "/extras"]
     )
@@ -1662,6 +1664,7 @@ class Cuberite7fd3fa5c(CppProfile):
     repo: str = "cuberite"
     commit: str = "7fd3fa5c9345a3f1b949c0988c4849db00a68486"
     test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    timeout: int = 500
     bug_gen_dirs_exclude: list[str] = field(
         default_factory=lambda: [
             *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
@@ -1710,6 +1713,7 @@ class Cppcheck67606e6e(CppProfile):
     repo: str = "cppcheck"
     commit: str = "67606e6ee50aaefa3ba6c312c644b8b962d7d9da"
     test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    timeout: int = 500
     bug_gen_dirs_exclude: list[str] = field(
         default_factory=lambda: [
             *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
@@ -1939,6 +1943,7 @@ class Drogon34955222(CppProfile):
     repo: str = "drogon"
     commit: str = "3495522200664bfef150257157c30aa076188a79"
     test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    timeout: int = 500
     bug_gen_dirs_exclude: list[str] = field(
         default_factory=lambda: [
             *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
@@ -2186,6 +2191,7 @@ class Benchmarkeed8f5c6(CppProfile):
     repo: str = "benchmark"
     commit: str = "eed8f5c682ed70d596b2b07c68b1588ecab3b24a"
     test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    timeout: int = 500
     bug_gen_dirs_exclude: list[str] = field(
         default_factory=lambda: [*DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE, "/bazel", "/bindings"]
     )
@@ -2311,6 +2317,7 @@ class Glog53d58e45(CppProfile):
     repo: str = "glog"
     commit: str = "53d58e4531c7c90f71ddab503d915e027432447a"
     test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    timeout: int = 500
     bug_gen_dirs_exclude: list[str] = field(
         default_factory=lambda: [*DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE, "/.bazelci", "/bazel"]
     )
@@ -2348,6 +2355,7 @@ class Googletest5a9c3f9e(CppProfile):
     repo: str = "googletest"
     commit: str = "5a9c3f9e8d9b90bbbe8feb32902146cb8f7c1757"
     test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    timeout: int = 500
     bug_gen_dirs_exclude: list[str] = field(
         default_factory=lambda: [*DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE, "/ci", "/googlemock"]
     )
@@ -2524,6 +2532,7 @@ class Gperftoolsa4724315(CppProfile):
     repo: str = "gperftools"
     commit: str = "a47243150ec41097602730ff8779fafcc172d1fb"
     test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    timeout: int = 500
     bug_gen_dirs_exclude: list[str] = field(
         default_factory=lambda: [
             *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
@@ -3431,6 +3440,7 @@ class OpenMVGc76d8724(CppProfile):
     repo: str = "openMVG"
     commit: str = "c76d87244fb3590fb8b9a752be34f07411057ae2"
     test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    timeout: int = 500
     bug_gen_dirs_exclude: list[str] = field(
         default_factory=lambda: [
             *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
