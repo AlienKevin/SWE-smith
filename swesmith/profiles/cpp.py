@@ -1840,7 +1840,25 @@ class Dragonfly14103bde(CppProfile):
     owner: str = "dragonflydb"
     repo: str = "dragonfly"
     commit: str = "14103bde242967fa55dea98d08391640c12cd4db"
-    test_cmd: str = "cd build-opt && ctest --verbose --output-on-failure"
+    test_cmd: str = 'cd build-opt && ninja hash_test string_view_sso_test && ctest -R "^(hash_test|string_view_sso_test)$" --verbose --output-on-failure'
+    bug_gen_dirs_exclude: list[str] = field(
+        default_factory=lambda: [
+            *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
+            "/contrib",
+            "/fuzz",
+            "/patches",
+            "/src",
+            "/tests",
+            "/helio/cmake",
+            "/helio/examples",
+            "/helio/io",
+            "/helio/patches",
+            "/helio/strings",
+            "/helio/tests",
+            "/helio/tools",
+            "/helio/util",
+        ]
+    )
 
     @property
     def dockerfile(self):
