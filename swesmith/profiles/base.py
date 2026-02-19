@@ -431,6 +431,7 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
         self,
         dirs_exclude: list[str] = [],
         dirs_include: list[str] = [],
+        files_exclude: list[str] = [],
         exclude_tests: bool = True,
         max_entities: int = -1,
     ) -> list[CodeEntity]:
@@ -462,6 +463,11 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
                     continue
 
                 file_path = os.path.join(root, file)
+                rel_file_path = "/" + os.path.relpath(file_path, dir_path).replace(
+                    os.sep, "/"
+                )
+                if files_exclude and rel_file_path in files_exclude:
+                    continue
 
                 try:
                     open(file_path, "r", encoding="utf-8").close()

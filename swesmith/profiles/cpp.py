@@ -19,6 +19,181 @@ DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE = [
 ]
 
 
+# Coverage-derived file excludes for Dracob91aa918 bug generation.
+DRACO_B91AA918_BUG_GEN_FILES_EXCLUDE = [
+    "/src/draco/animation/animation.cc",
+    "/src/draco/animation/animation.h",
+    "/src/draco/animation/keyframe_animation_encoder.h",
+    "/src/draco/animation/node_animation_data.h",
+    "/src/draco/animation/skin.cc",
+    "/src/draco/animation/skin.h",
+    "/src/draco/attributes/attribute_transform_type.h",
+    "/src/draco/attributes/geometry_indices.h",
+    "/src/draco/compression/attributes/kd_tree_attributes_decoder.h",
+    "/src/draco/compression/attributes/kd_tree_attributes_encoder.h",
+    "/src/draco/compression/attributes/kd_tree_attributes_shared.h",
+    "/src/draco/compression/attributes/prediction_schemes/mesh_prediction_scheme_constrained_multi_parallelogram_decoder.h",
+    "/src/draco/compression/attributes/prediction_schemes/mesh_prediction_scheme_constrained_multi_parallelogram_shared.h",
+    "/src/draco/compression/attributes/prediction_schemes/mesh_prediction_scheme_multi_parallelogram_decoder.h",
+    "/src/draco/compression/attributes/prediction_schemes/mesh_prediction_scheme_multi_parallelogram_encoder.h",
+    "/src/draco/compression/attributes/prediction_schemes/mesh_prediction_scheme_tex_coords_decoder.h",
+    "/src/draco/compression/attributes/prediction_schemes/mesh_prediction_scheme_tex_coords_encoder.h",
+    "/src/draco/compression/attributes/prediction_schemes/prediction_scheme_decoder_interface.h",
+    "/src/draco/compression/attributes/prediction_schemes/prediction_scheme_decoding_transform.h",
+    "/src/draco/compression/attributes/prediction_schemes/prediction_scheme_encoder_interface.h",
+    "/src/draco/compression/attributes/prediction_schemes/prediction_scheme_encoding_transform.h",
+    "/src/draco/compression/attributes/prediction_schemes/prediction_scheme_normal_octahedron_decoding_transform.h",
+    "/src/draco/compression/attributes/sequential_quantization_attribute_decoder.h",
+    "/src/draco/compression/bit_coders/adaptive_rans_bit_coding_shared.h",
+    "/src/draco/compression/bit_coders/adaptive_rans_bit_decoder.cc",
+    "/src/draco/compression/bit_coders/adaptive_rans_bit_decoder.h",
+    "/src/draco/compression/bit_coders/adaptive_rans_bit_encoder.cc",
+    "/src/draco/compression/bit_coders/adaptive_rans_bit_encoder.h",
+    "/src/draco/compression/bit_coders/rans_bit_encoder.h",
+    "/src/draco/compression/bit_coders/symbol_bit_decoder.cc",
+    "/src/draco/compression/bit_coders/symbol_bit_decoder.h",
+    "/src/draco/compression/bit_coders/symbol_bit_encoder.cc",
+    "/src/draco/compression/bit_coders/symbol_bit_encoder.h",
+    "/src/draco/compression/config/compression_shared.h",
+    "/src/draco/compression/config/decoder_options.h",
+    "/src/draco/compression/config/encoding_features.h",
+    "/src/draco/compression/decode.h",
+    "/src/draco/compression/draco_compression_options.cc",
+    "/src/draco/compression/draco_compression_options.h",
+    "/src/draco/compression/entropy/symbol_decoding.h",
+    "/src/draco/compression/entropy/symbol_encoding.h",
+    "/src/draco/compression/expert_encode.h",
+    "/src/draco/compression/mesh/mesh_edgebreaker_traversal_predictive_decoder.h",
+    "/src/draco/compression/mesh/mesh_edgebreaker_traversal_predictive_encoder.h",
+    "/src/draco/compression/mesh/mesh_edgebreaker_traversal_valence_decoder.h",
+    "/src/draco/compression/mesh/mesh_edgebreaker_traversal_valence_encoder.h",
+    "/src/draco/compression/mesh/mesh_sequential_decoder.h",
+    "/src/draco/compression/point_cloud/algorithms/dynamic_integer_points_kd_tree_decoder.cc",
+    "/src/draco/compression/point_cloud/algorithms/dynamic_integer_points_kd_tree_encoder.cc",
+    "/src/draco/compression/point_cloud/algorithms/float_points_tree_decoder.cc",
+    "/src/draco/compression/point_cloud/algorithms/float_points_tree_decoder.h",
+    "/src/draco/compression/point_cloud/algorithms/float_points_tree_encoder.cc",
+    "/src/draco/compression/point_cloud/algorithms/float_points_tree_encoder.h",
+    "/src/draco/compression/point_cloud/algorithms/integer_points_kd_tree_decoder.cc",
+    "/src/draco/compression/point_cloud/algorithms/integer_points_kd_tree_decoder.h",
+    "/src/draco/compression/point_cloud/algorithms/integer_points_kd_tree_encoder.cc",
+    "/src/draco/compression/point_cloud/algorithms/integer_points_kd_tree_encoder.h",
+    "/src/draco/compression/point_cloud/algorithms/point_cloud_compression_method.h",
+    "/src/draco/compression/point_cloud/algorithms/point_cloud_types.h",
+    "/src/draco/compression/point_cloud/algorithms/quantize_points_3.h",
+    "/src/draco/compression/point_cloud/algorithms/queuing_policy.h",
+    "/src/draco/compression/point_cloud/point_cloud_kd_tree_decoder.h",
+    "/src/draco/compression/point_cloud/point_cloud_sequential_decoder.h",
+    "/src/draco/core/bounding_box.cc",
+    "/src/draco/core/bounding_box.h",
+    "/src/draco/core/constants.h",
+    "/src/draco/core/cycle_timer.cc",
+    "/src/draco/core/cycle_timer.h",
+    "/src/draco/core/divide.cc",
+    "/src/draco/core/draco_test_base.h",
+    "/src/draco/core/draco_types.h",
+    "/src/draco/core/draco_version.h",
+    "/src/draco/core/macros.h",
+    "/src/draco/io/file_reader_factory.h",
+    "/src/draco/io/file_reader_test_common.h",
+    "/src/draco/io/file_utils.h",
+    "/src/draco/io/file_writer_factory.h",
+    "/src/draco/io/file_writer_utils.h",
+    "/src/draco/io/gltf_decoder.cc",
+    "/src/draco/io/gltf_decoder.h",
+    "/src/draco/io/gltf_encoder.cc",
+    "/src/draco/io/gltf_encoder.h",
+    "/src/draco/io/gltf_test_helper.cc",
+    "/src/draco/io/gltf_test_helper.h",
+    "/src/draco/io/gltf_utils.cc",
+    "/src/draco/io/gltf_utils.h",
+    "/src/draco/io/image_compression_options.h",
+    "/src/draco/io/parser_utils.h",
+    "/src/draco/io/ply_encoder.cc",
+    "/src/draco/io/ply_encoder.h",
+    "/src/draco/io/scene_io.cc",
+    "/src/draco/io/scene_io.h",
+    "/src/draco/io/stl_decoder.h",
+    "/src/draco/io/texture_io.cc",
+    "/src/draco/io/texture_io.h",
+    "/src/draco/io/tiny_gltf_utils.cc",
+    "/src/draco/io/tiny_gltf_utils.h",
+    "/src/draco/javascript/emscripten/decoder_webidl_wrapper.cc",
+    "/src/draco/javascript/emscripten/decoder_webidl_wrapper.h",
+    "/src/draco/javascript/emscripten/draco_decoder_glue_wrapper.cc",
+    "/src/draco/javascript/emscripten/draco_encoder_glue_wrapper.cc",
+    "/src/draco/javascript/emscripten/encoder_webidl_wrapper.cc",
+    "/src/draco/javascript/emscripten/encoder_webidl_wrapper.h",
+    "/src/draco/material/material.cc",
+    "/src/draco/material/material.h",
+    "/src/draco/material/material_library.cc",
+    "/src/draco/material/material_library.h",
+    "/src/draco/material/material_utils.cc",
+    "/src/draco/material/material_utils.h",
+    "/src/draco/maya/draco_maya_plugin.cc",
+    "/src/draco/maya/draco_maya_plugin.h",
+    "/src/draco/mesh/mesh_features.cc",
+    "/src/draco/mesh/mesh_features.h",
+    "/src/draco/mesh/mesh_indices.h",
+    "/src/draco/mesh/mesh_misc_functions.h",
+    "/src/draco/mesh/mesh_splitter.cc",
+    "/src/draco/mesh/mesh_splitter.h",
+    "/src/draco/mesh/mesh_stripifier.cc",
+    "/src/draco/mesh/mesh_stripifier.h",
+    "/src/draco/mesh/mesh_utils.cc",
+    "/src/draco/mesh/mesh_utils.h",
+    "/src/draco/mesh/triangle_soup_mesh_builder.h",
+    "/src/draco/metadata/metadata_decoder.h",
+    "/src/draco/metadata/property_attribute.cc",
+    "/src/draco/metadata/property_attribute.h",
+    "/src/draco/metadata/property_table.cc",
+    "/src/draco/metadata/property_table.h",
+    "/src/draco/metadata/structural_metadata.cc",
+    "/src/draco/metadata/structural_metadata.h",
+    "/src/draco/metadata/structural_metadata_schema.cc",
+    "/src/draco/metadata/structural_metadata_schema.h",
+    "/src/draco/point_cloud/point_cloud_builder.h",
+    "/src/draco/scene/instance_array.cc",
+    "/src/draco/scene/instance_array.h",
+    "/src/draco/scene/light.cc",
+    "/src/draco/scene/light.h",
+    "/src/draco/scene/mesh_group.h",
+    "/src/draco/scene/scene.cc",
+    "/src/draco/scene/scene.h",
+    "/src/draco/scene/scene_are_equivalent.cc",
+    "/src/draco/scene/scene_are_equivalent.h",
+    "/src/draco/scene/scene_indices.h",
+    "/src/draco/scene/scene_node.h",
+    "/src/draco/scene/scene_utils.cc",
+    "/src/draco/scene/scene_utils.h",
+    "/src/draco/scene/trs_matrix.cc",
+    "/src/draco/scene/trs_matrix.h",
+    "/src/draco/texture/source_image.cc",
+    "/src/draco/texture/source_image.h",
+    "/src/draco/texture/texture.h",
+    "/src/draco/texture/texture_library.cc",
+    "/src/draco/texture/texture_library.h",
+    "/src/draco/texture/texture_map.cc",
+    "/src/draco/texture/texture_map.h",
+    "/src/draco/texture/texture_transform.cc",
+    "/src/draco/texture/texture_transform.h",
+    "/src/draco/texture/texture_utils.cc",
+    "/src/draco/texture/texture_utils.h",
+    "/src/draco/tools/draco_decoder.cc",
+    "/src/draco/tools/draco_encoder.cc",
+    "/src/draco/tools/draco_transcoder.cc",
+    "/src/draco/tools/draco_transcoder_lib.cc",
+    "/src/draco/tools/draco_transcoder_lib.h",
+    "/src/draco/tools/fuzz/draco_mesh_decoder_fuzzer.cc",
+    "/src/draco/tools/fuzz/draco_mesh_decoder_without_dequantization_fuzzer.cc",
+    "/src/draco/tools/fuzz/draco_pc_decoder_fuzzer.cc",
+    "/src/draco/tools/fuzz/draco_pc_decoder_without_dequantization_fuzzer.cc",
+    "/src/draco/tools/install_test/main.cc",
+    "/src/draco/unity/draco_unity_plugin.cc",
+    "/src/draco/unity/draco_unity_plugin.h",
+]
+
+
 @dataclass
 class CppProfile(RepoProfile):
     """
@@ -32,20 +207,27 @@ class CppProfile(RepoProfile):
     bug_gen_dirs_exclude: list[str] = field(
         default_factory=lambda: list(DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE)
     )
+    # Optionally exclude specific files (relative path from repo root, with leading "/").
+    bug_gen_files_exclude: list[str] = field(default_factory=list)
 
     def extract_entities(
         self,
         dirs_exclude: list[str] | None = None,
         dirs_include: list[str] = [],
+        files_exclude: list[str] | None = None,
         exclude_tests: bool = True,
         max_entities: int = -1,
     ) -> list:
         if dirs_exclude is None:
             dirs_exclude = []
+        if files_exclude is None:
+            files_exclude = []
         merged_excludes = [*dirs_exclude, *self.bug_gen_dirs_exclude]
+        merged_files_exclude = [*files_exclude, *self.bug_gen_files_exclude]
         return super().extract_entities(
             dirs_exclude=merged_excludes,
             dirs_include=dirs_include,
+            files_exclude=merged_files_exclude,
             exclude_tests=exclude_tests,
             max_entities=max_entities,
         )
@@ -2007,7 +2189,15 @@ class Dracob91aa918(CppProfile):
     owner: str = "google"
     repo: str = "draco"
     commit: str = "b91aa9181a753e70d005fdb0cdcde06acddf68fa"
-    test_cmd: str = "./build/draco_tests --gtest_color=no"
+    # Rebuild is required so source-level patches are reflected in test execution.
+    test_cmd: str = "cd build && make -j$(nproc) && ./draco_tests --gtest_color=no"
+    timeout: int = 300
+    bug_gen_dirs_exclude: list[str] = field(
+        default_factory=lambda: [*DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE, "/third_party"]
+    )
+    bug_gen_files_exclude: list[str] = field(
+        default_factory=lambda: list(DRACO_B91AA918_BUG_GEN_FILES_EXCLUDE)
+    )
 
     @property
     def dockerfile(self):
