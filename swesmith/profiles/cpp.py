@@ -612,6 +612,7 @@ class FTXUIf73d92d3(CppProfile):
     repo: str = "FTXUI"
     commit: str = "f73d92d31f5efeccadfb7081edadbc070ef42f73"
     test_cmd: str = "cd build && cmake --build . -j4 && ./ftxui-tests --gtest_color=no"
+    timeout: int = 500
     bug_gen_dirs_exclude: list[str] = field(
         default_factory=lambda: [*DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE, "/bazel"]
     )
@@ -1821,6 +1822,7 @@ class Doctest1da23a3e(CppProfile):
     repo: str = "doctest"
     commit: str = "1da23a3e8119ec5cce4f9388e91b065e20bf06f5"
     test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    timeout: int = 500
 
     @property
     def dockerfile(self):
@@ -2067,6 +2069,7 @@ class Falco43aaffc4(CppProfile):
     repo: str = "falco"
     commit: str = "43aaffc4e05a62f6f29d719a1dee51a5ccc3856d"
     test_cmd: str = "cd build && cmake --build . -j4 && ./unit_tests/falco_unit_tests"
+    timeout: int = 500
     bug_gen_dirs_exclude: list[str] = field(
         default_factory=lambda: [
             *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
@@ -2262,7 +2265,7 @@ class Dracob91aa918(CppProfile):
     commit: str = "b91aa9181a753e70d005fdb0cdcde06acddf68fa"
     # Rebuild is required so source-level patches are reflected in test execution.
     test_cmd: str = "cd build && make -j$(nproc) && ./draco_tests --gtest_color=no"
-    timeout: int = 300
+    timeout: int = 500
     bug_gen_dirs_exclude: list[str] = field(
         default_factory=lambda: [
             *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
@@ -2724,6 +2727,7 @@ class Yamlcpp2e6383d2(CppProfile):
     repo: str = "yaml-cpp"
     commit: str = "2e6383d272f676e1ad28ae5c47016045cbaff938"
     test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    timeout: int = 500
     bug_gen_dirs_exclude: list[str] = field(
         default_factory=lambda: [*DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE, "/util"]
     )
@@ -2867,6 +2871,7 @@ class Ledger920059e6(CppProfile):
     repo: str = "ledger"
     commit: str = "920059e6a4a9fbb7ccb9e2cbd6e8a8a06648c113"
     test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    timeout: int = 500
     bug_gen_dirs_exclude: list[str] = field(
         default_factory=lambda: [
             *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
@@ -3081,6 +3086,7 @@ class Luau54a2ea00(CppProfile):
     repo: str = "luau"
     commit: str = "54a2ea00831df4c791e6cfc896a98da75d1ae126"
     test_cmd: str = "cmake --build build -j4 && ./build/Luau.UnitTest --reporters=console --no-colors"
+    timeout: int = 500
     bug_gen_dirs_exclude: list[str] = field(
         default_factory=lambda: [
             *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
@@ -3334,6 +3340,7 @@ class Ninjacc60300a(CppProfile):
     repo: str = "ninja"
     commit: str = "cc60300ab94dae9bb28fece3c9b7c397235b17de"
     test_cmd: str = "cd build && make -j$(nproc) && ./ninja_test"
+    timeout: int = 500
     bug_gen_dirs_exclude: list[str] = field(
         default_factory=lambda: [*DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE, "/misc", "/windows"]
     )
@@ -3964,6 +3971,7 @@ class Taskflowd8776bc0(CppProfile):
     repo: str = "taskflow"
     commit: str = "d8776bc0d3317efbf2c2376006d74a04a6eabf2a"
     test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    timeout: int = 500
     bug_gen_dirs_exclude: list[str] = field(
         default_factory=lambda: [*DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE, "/3rd-party"]
     )
@@ -4084,6 +4092,7 @@ class Libzmq51a5a9cb(CppProfile):
     repo: str = "libzmq"
     commit: str = "51a5a9cbe315ab149357afe063e9e2d41f4c99a8"
     test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
+    timeout: int = 500
     bug_gen_dirs_exclude: list[str] = field(
         default_factory=lambda: [
             *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
