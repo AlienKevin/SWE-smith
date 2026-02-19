@@ -23,8 +23,8 @@ from docker.models.containers import Container
 from dotenv import load_dotenv
 from functools import cached_property
 from ghapi.all import GhApi
-from multiprocessing import Lock
 from pathlib import Path
+from threading import Lock as ThreadLock
 
 # Note: swesmith.bug_gen.adapters is imported lazily in extract_entities() to avoid
 # loading tree-sitter dependencies when only using Registry/get_valid_report
@@ -117,11 +117,10 @@ class RepoProfile(ABC, metaclass=SingletonMeta):
     # Affects valid.py
     min_pregold: bool = False
 
-    # The lock is to prevent concurrent clones of the same repository.
-    # In this repo, all subclasses of RepoProfile are meant to be Singletons (only one instance
-    # of the class will ever be created). If this changes for some reason in the future,
-    # this design may have to be updated.
-    _lock: Lock = field(default_factory=Lock, init=False, repr=False, compare=False)
+    # Per-profile lock to prevent concurrent clone/cache initialization races.
+    # We intentionally use threading.Lock (not multiprocessing.Lock) to avoid
+    # allocating OS semaphores for every registered profile instance.
+    _lock: object = field(default_factory=ThreadLock, init=False, repr=False, compare=False)
 
     # GitHub API instance (lazily initialized)
     _api: GhApi | None = field(default=None, init=False, repr=False, compare=False)
