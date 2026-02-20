@@ -194,6 +194,47 @@ DRACO_B91AA918_BUG_GEN_FILES_EXCLUDE = [
 ]
 
 
+TASKFLOW_D8776BC0_BUG_GEN_FILES_EXCLUDE = [
+    "/taskflow/algorithm/algorithm.hpp",
+    "/taskflow/algorithm/sort.hpp",
+    "/taskflow/core/atomic_notifier.hpp",
+    "/taskflow/core/declarations.hpp",
+    "/taskflow/core/environment.hpp",
+    "/taskflow/core/error.hpp",
+    "/taskflow/core/observer.hpp",
+    "/taskflow/cuda/algorithm/find.hpp",
+    "/taskflow/cuda/algorithm/for_each.hpp",
+    "/taskflow/cuda/algorithm/matmul.hpp",
+    "/taskflow/cuda/algorithm/merge.hpp",
+    "/taskflow/cuda/algorithm/reduce.hpp",
+    "/taskflow/cuda/algorithm/scan.hpp",
+    "/taskflow/cuda/algorithm/single_task.hpp",
+    "/taskflow/cuda/algorithm/sort.hpp",
+    "/taskflow/cuda/algorithm/transform.hpp",
+    "/taskflow/cuda/algorithm/transpose.hpp",
+    "/taskflow/cuda/cuda_capturer.hpp",
+    "/taskflow/cuda/cuda_device.hpp",
+    "/taskflow/cuda/cuda_error.hpp",
+    "/taskflow/cuda/cuda_execution_policy.hpp",
+    "/taskflow/cuda/cuda_graph.hpp",
+    "/taskflow/cuda/cuda_graph_exec.hpp",
+    "/taskflow/cuda/cuda_memory.hpp",
+    "/taskflow/cuda/cuda_meta.hpp",
+    "/taskflow/cuda/cuda_optimizer.hpp",
+    "/taskflow/cuda/cuda_stream.hpp",
+    "/taskflow/cuda/cudaflow.hpp",
+    "/taskflow/taskflow.hpp",
+    "/taskflow/utility/lazy_string.hpp",
+    "/taskflow/utility/macros.hpp",
+    "/taskflow/utility/mpmc.hpp",
+    "/taskflow/utility/object_pool.hpp",
+    "/taskflow/utility/os.hpp",
+    "/taskflow/utility/serializer.hpp",
+    "/taskflow/utility/stream.hpp",
+    "/taskflow/utility/uuid.hpp",
+]
+
+
 @dataclass
 class CppProfile(RepoProfile):
     """
@@ -3983,7 +4024,16 @@ class Taskflowd8776bc0(CppProfile):
     test_cmd: str = "cd build && cmake --build . -j4 && ctest --verbose --output-on-failure --rerun-failed --repeat until-pass:1"
     timeout: int = 500
     bug_gen_dirs_exclude: list[str] = field(
-        default_factory=lambda: [*DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE, "/3rd-party"]
+        default_factory=lambda: [
+            *DEFAULT_CPP_BUG_GEN_DIRS_EXCLUDE,
+            "/3rd-party",
+            "/sandbox",
+            "/tfprof",
+            "/unittests",
+        ]
+    )
+    bug_gen_files_exclude: list[str] = field(
+        default_factory=lambda: list(TASKFLOW_D8776BC0_BUG_GEN_FILES_EXCLUDE)
     )
 
     @property
