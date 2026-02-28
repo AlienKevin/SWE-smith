@@ -1,5 +1,6 @@
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from swesmith.constants import ENV_NAME
 from swesmith.profiles.base import RepoProfile, registry
@@ -19,6 +20,7 @@ class TypeScriptProfile(RepoProfile):
     """
 
     exts: list[str] = field(default_factory=lambda: [".ts", ".tsx"])
+    timeout: int = 600
 
     def extract_entities(
         self,
@@ -306,7 +308,7 @@ RUN pnpm install --no-frozen-lockfile
 CMD ["/bin/bash"]"""
 
     def log_parser(self, log: str) -> dict[str, str]:
-        return parse_log_jest(log)
+        return parse_log_vitest(log)
 
 
 @dataclass
@@ -332,6 +334,44 @@ CMD ["/bin/bash"]"""
 
     def log_parser(self, log: str) -> dict[str, str]:
         return parse_log_vitest(log)
+
+    def extract_entities(
+        self,
+        dirs_exclude: list[str] | None = None,
+        dirs_include: list[str] = [],
+        exclude_tests: bool = True,
+        max_entities: int = -1,
+    ) -> list:
+        # Restrict mutation scope to source roots exercised by pre-gold tests.
+        tested_source_roots = [
+            "apps/demo-fuels/src",
+            "apps/docs/.vitepress/plugins",
+            "internal/check-tests/src",
+            "packages/abi-coder/src",
+            "packages/abi-typegen/src",
+            "packages/account/src",
+            "packages/address/src",
+            "packages/contract/src",
+            "packages/create-fuels/src",
+            "packages/crypto/src",
+            "packages/errors/src",
+            "packages/fuel-gauge/src",
+            "packages/fuels/src",
+            "packages/hasher/src",
+            "packages/logger/src",
+            "packages/math/src",
+            "packages/merkle/src",
+            "packages/program/src",
+            "packages/transactions/src",
+            "packages/utils/src",
+            "packages/versions/src",
+        ]
+        return super().extract_entities(
+            dirs_include=tested_source_roots,
+            dirs_exclude=dirs_exclude,
+            exclude_tests=exclude_tests,
+            max_entities=max_entities,
+        )
 
 
 @dataclass
@@ -1071,6 +1111,43 @@ CMD ["/bin/bash"]"""
     def log_parser(self, log: str) -> dict[str, str]:
         return parse_log_vitest(log)
 
+    def extract_entities(
+        self,
+        dirs_exclude: list[str] | None = None,
+        dirs_include: list[str] = [],
+        exclude_tests: bool = True,
+        max_entities: int = -1,
+    ) -> list:
+        # Focus on backend/domain logic with stronger unit-test coupling.
+        if not dirs_include:
+            dirs_include = [
+                "packages/features/ee",
+                "packages/features/bookings",
+                "packages/features/pbac",
+                "packages/features/schedules",
+                "packages/features/insights",
+                "packages/features/eventtypes",
+                "packages/features/routing-forms",
+                "packages/trpc/server",
+                "packages/lib/server",
+            ]
+        if dirs_exclude is None:
+            dirs_exclude = [
+                "apps/web",
+                "companion",
+                "packages/ui",
+                "packages/coss-ui",
+                "packages/embeds",
+                "playwright",
+            ]
+
+        return super().extract_entities(
+            dirs_exclude=dirs_exclude,
+            dirs_include=dirs_include,
+            exclude_tests=exclude_tests,
+            max_entities=max_entities,
+        )
+
 
 @dataclass
 class Gitmoji72dd6f38(TypeScriptProfile):
@@ -1295,7 +1372,27 @@ RUN cd gui && npm install
 CMD ["/bin/bash"]"""
 
     def log_parser(self, log: str) -> dict[str, str]:
-        return parse_log_jest(log)
+        return parse_log_vitest(log)
+
+    def extract_entities(
+        self,
+        dirs_exclude: list[str] | None = None,
+        dirs_include: list[str] = [],
+        exclude_tests: bool = True,
+        max_entities: int = -1,
+    ) -> list:
+        # Test command runs only under core/, so mutations outside core are low-signal.
+        if not dirs_include:
+            dirs_include = ["core"]
+        if dirs_exclude is None:
+            dirs_exclude = ["gui", "extensions", "packages", "manual-testing-sandbox"]
+
+        return super().extract_entities(
+            dirs_exclude=dirs_exclude,
+            dirs_include=dirs_include,
+            exclude_tests=exclude_tests,
+            max_entities=max_entities,
+        )
 
 
 @dataclass
@@ -1669,6 +1766,21 @@ CMD ["/bin/bash"]"""
 
     def log_parser(self, log: str) -> dict[str, str]:
         return parse_log_jest(log)
+
+    def extract_entities(
+        self,
+        dirs_exclude: list[str] | None = None,
+        dirs_include: list[str] = [],
+        exclude_tests: bool = True,
+        max_entities: int = -1,
+    ) -> list:
+        # Focus on the core package where baseline tests reliably pass.
+        return super().extract_entities(
+            dirs_include=["packages/core/src"],
+            dirs_exclude=dirs_exclude,
+            exclude_tests=exclude_tests,
+            max_entities=max_entities,
+        )
 
 
 @dataclass
@@ -2370,6 +2482,64 @@ CMD ["/bin/bash"]"""
     def log_parser(self, log: str) -> dict[str, str]:
         return parse_log_mocha(log)
 
+    def extract_entities(
+        self,
+        dirs_exclude: list[str] | None = None,
+        dirs_include: list[str] = [],
+        exclude_tests: bool = True,
+        max_entities: int = -1,
+    ) -> list:
+        # The unit/node suite exercises core engine code more than workbench/extension UI.
+        # Restrict mutation candidates to core dirs to improve validation signal.
+        if not dirs_include:
+            dirs_include = [
+                "src/vs/base/common",
+                "src/vs/editor/common/core",
+                "src/vs/editor/common/model",
+            ]
+        if dirs_exclude is None:
+            dirs_exclude = ["src/vs/workbench", "extensions", "src/vs/base/browser"]
+
+        entities = super().extract_entities(
+            dirs_exclude=dirs_exclude,
+            dirs_include=dirs_include,
+            exclude_tests=exclude_tests,
+            max_entities=max_entities,
+        )
+
+        # Empirically, many model subtrees are weakly coupled to this test suite.
+        # Keep a high-signal allowlist and prune known low-yield regions.
+        allow = [
+            "src/vs/base/common/sseParser.ts",
+            "src/vs/base/common/oauth.ts",
+            "src/vs/base/common/color.ts",
+            "src/vs/base/common/ternarySearchTree.ts",
+            "src/vs/base/common/keybindings.ts",
+            "src/vs/base/common/strings.ts",
+            "src/vs/base/common/async.ts",
+            "src/vs/editor/common/core/text/",
+            "src/vs/editor/common/core/ranges/",
+            "src/vs/editor/common/core/textChange.ts",
+            "src/vs/editor/common/model/textModel.ts",
+            "src/vs/editor/common/model/textModelSearch.ts",
+            "src/vs/editor/common/model/textModelTokens.ts",
+            "src/vs/editor/common/model/prefixSumComputer.ts",
+            "src/vs/editor/common/model/tokens/",
+        ]
+        deny = [
+            "src/vs/editor/common/model/pieceTreeTextBuffer/",
+            "src/vs/editor/common/model/bracketPairsTextModelPart/",
+            "src/vs/editor/common/model/intervalTree.ts",
+        ]
+
+        filtered = [
+            entity
+            for entity in entities
+            if any(token in entity.file_path for token in allow)
+            and not any(token in entity.file_path for token in deny)
+        ]
+        return filtered
+
 
 @dataclass
 class Losslesscut26013077(TypeScriptProfile):
@@ -3041,6 +3211,54 @@ CMD ["/bin/bash"]"""
     def log_parser(self, log: str) -> dict[str, str]:
         return parse_log_jest(log)
 
+    def extract_entities(
+        self,
+        dirs_exclude: list[str] | None = None,
+        dirs_include: list[str] = [],
+        exclude_tests: bool = True,
+        max_entities: int = -1,
+    ) -> list:
+        # Build a strict source-file allowlist from test file paths.
+        test_paths = self._get_cached_test_paths()
+        covered_files: set[str] = set()
+
+        for test_path in test_paths:
+            parts = test_path.parts
+            if len(parts) < 3 or parts[0] != "test":
+                continue
+
+            # Ignore non-library helper scripts.
+            if parts[1] in {"scripts"}:
+                continue
+
+            stem = re.sub(r"\.(spec|test)$", "", test_path.stem)
+            name_variants = {stem}
+            if "." in stem:
+                name_variants.add(stem.split(".", 1)[0])
+
+            src_dir = Path("src", *parts[1:-1]).as_posix()
+            for base in name_variants:
+                covered_files.add(f"{src_dir}/{base}.ts")
+                covered_files.add(f"{src_dir}/{base}.tsx")
+
+        entities = super().extract_entities(
+            dirs_include=["src"],
+            dirs_exclude=dirs_exclude,
+            exclude_tests=exclude_tests,
+            max_entities=max_entities,
+        )
+
+        filtered = []
+        repo_marker = f"{self.repo_name}/"
+        for entity in entities:
+            rel = entity.file_path.replace("\\", "/")
+            if repo_marker in rel:
+                rel = rel.split(repo_marker, 1)[1]
+            if rel in covered_files:
+                filtered.append(entity)
+
+        return filtered
+
 
 @dataclass
 class Noderedised55918a(TypeScriptProfile):
@@ -3432,6 +3650,34 @@ CMD ["/bin/bash"]"""
     def log_parser(self, log: str) -> dict[str, str]:
         return parse_log_jest(log)
 
+    def extract_entities(
+        self,
+        dirs_exclude: list[str] | None = None,
+        dirs_include: list[str] = [],
+        exclude_tests: bool = True,
+        max_entities: int = -1,
+    ) -> list:
+        # Restrict to core source files that appear in pre-gold stack traces.
+        allow = {
+            "packages/core/src/StateMachine.ts",
+            "packages/core/src/createActor.ts",
+            "packages/core/src/Mailbox.ts",
+            "packages/core/src/system.ts",
+            "packages/core/src/actors/promise.ts",
+            "packages/core/src/actions/emit.ts",
+        }
+        entities = super().extract_entities(
+            dirs_include=["packages/core/src"],
+            dirs_exclude=dirs_exclude,
+            exclude_tests=exclude_tests,
+            max_entities=max_entities,
+        )
+        return [
+            entity
+            for entity in entities
+            if any(entity.file_path.replace("\\", "/").endswith(path) for path in allow)
+        ]
+
 
 @dataclass
 class Strapie5b87a54(TypeScriptProfile):
@@ -3693,6 +3939,170 @@ CMD ["/bin/bash"]"""
 
     def log_parser(self, log: str) -> dict[str, str]:
         return parse_log_jest(log)
+
+    def extract_entities(
+        self,
+        dirs_exclude: list[str] | None = None,
+        dirs_include: list[str] = [],
+        exclude_tests: bool = True,
+        max_entities: int = -1,
+    ) -> list:
+        # Restrict mutations to source files exercised by the pre-gold baseline.
+        allow = {
+            "apps/analytics/src/state/state.ts",
+            "apps/bemo-worker/src/worker.ts",
+            "apps/docs/utils/parse-markdown.tsx",
+            "apps/dotcom/client/src/routes.tsx",
+            "apps/dotcom/client/src/utils/multiplayerAssetStore.ts",
+            "apps/dotcom/sync-worker/src/AlarmScheduler.ts",
+            "apps/dotcom/sync-worker/src/replicator/Subscription.ts",
+            "apps/dotcom/sync-worker/src/snapshotUtils.ts",
+            "packages/create-tldraw/src/wrap-ansi.ts",
+            "packages/dotcom-shared/src/index.ts",
+            "packages/editor/src/lib/config/TLEditorSnapshot.ts",
+            "packages/editor/src/lib/config/TLUserPreferences.ts",
+            "packages/editor/src/lib/editor/Editor.ts",
+            "packages/editor/src/lib/editor/managers/ClickManager/ClickManager.ts",
+            "packages/editor/src/lib/editor/managers/EdgeScrollManager/EdgeScrollManager.ts",
+            "packages/editor/src/lib/editor/managers/FocusManager/FocusManager.ts",
+            "packages/editor/src/lib/editor/managers/FontManager/FontManager.ts",
+            "packages/editor/src/lib/editor/managers/HistoryManager/HistoryManager.ts",
+            "packages/editor/src/lib/editor/managers/SnapManager/SnapManager.ts",
+            "packages/editor/src/lib/editor/managers/TextManager/TextManager.ts",
+            "packages/editor/src/lib/editor/managers/TickManager/TickManager.ts",
+            "packages/editor/src/lib/editor/managers/UserPreferencesManager/UserPreferencesManager.ts",
+            "packages/editor/src/lib/editor/tools/StateNode.ts",
+            "packages/editor/src/lib/exports/parseCss.ts",
+            "packages/editor/src/lib/license/LicenseManager.ts",
+            "packages/editor/src/lib/license/Watermark.tsx",
+            "packages/editor/src/lib/primitives/Box.ts",
+            "packages/editor/src/lib/primitives/Mat.ts",
+            "packages/editor/src/lib/primitives/Vec.ts",
+            "packages/editor/src/lib/primitives/geometry/Arc2d.ts",
+            "packages/editor/src/lib/primitives/geometry/Circle2d.ts",
+            "packages/editor/src/lib/primitives/geometry/CubicBezier2d.ts",
+            "packages/editor/src/lib/primitives/geometry/CubicSpline2d.ts",
+            "packages/editor/src/lib/primitives/geometry/Edge2d.ts",
+            "packages/editor/src/lib/primitives/geometry/Ellipse2d.ts",
+            "packages/editor/src/lib/primitives/geometry/Geometry2d.ts",
+            "packages/editor/src/lib/primitives/geometry/Group2d.ts",
+            "packages/editor/src/lib/primitives/geometry/Point2d.ts",
+            "packages/editor/src/lib/primitives/geometry/Polygon2d.ts",
+            "packages/editor/src/lib/primitives/geometry/Rectangle2d.ts",
+            "packages/editor/src/lib/primitives/geometry/Stadium2d.ts",
+            "packages/editor/src/lib/primitives/intersect.ts",
+            "packages/editor/src/lib/primitives/utils.ts",
+            "packages/editor/src/lib/utils/deepLinks.ts",
+            "packages/editor/src/lib/utils/dom.ts",
+            "packages/editor/src/lib/utils/sync/LocalIndexedDb.ts",
+            "packages/editor/src/lib/utils/sync/TLLocalSyncClient.ts",
+            "packages/namespaced-tldraw/src/index.ts",
+            "packages/state/src/lib/EffectScheduler.ts",
+            "packages/state/src/lib/HistoryBuffer.ts",
+            "packages/state/src/lib/arraySet.ts",
+            "packages/state/src/lib/atom.ts",
+            "packages/state/src/lib/capture.ts",
+            "packages/state/src/lib/computed.ts",
+            "packages/state/src/lib/helpers.ts",
+            "packages/state/src/lib/localStorageAtom.ts",
+            "packages/state/src/lib/transactions.ts",
+            "packages/store/src/lib/AtomMap.ts",
+            "packages/store/src/lib/BaseRecord.ts",
+            "packages/store/src/lib/ImmutableMap.ts",
+            "packages/store/src/lib/IncrementalSetConstructor.ts",
+            "packages/store/src/lib/RecordsDiff.ts",
+            "packages/store/src/lib/Store.ts",
+            "packages/store/src/lib/StoreQueries.ts",
+            "packages/store/src/lib/StoreSchema.ts",
+            "packages/store/src/lib/StoreSideEffects.ts",
+            "packages/store/src/lib/devFreeze.ts",
+            "packages/store/src/lib/executeQuery.ts",
+            "packages/store/src/lib/migrate.ts",
+            "packages/store/src/lib/recordType.ts",
+            "packages/store/src/lib/setUtils.ts",
+            "packages/sync-core/src/lib/ClientWebSocketAdapter.ts",
+            "packages/sync-core/src/lib/InMemorySyncStorage.ts",
+            "packages/sync-core/src/lib/MicrotaskNotifier.ts",
+            "packages/sync-core/src/lib/RoomSession.ts",
+            "packages/sync-core/src/lib/ServerSocketAdapter.ts",
+            "packages/sync-core/src/lib/TLSocketRoom.ts",
+            "packages/sync-core/src/lib/TLSyncClient.ts",
+            "packages/sync-core/src/lib/TLSyncRoom.ts",
+            "packages/sync-core/src/lib/chunk.ts",
+            "packages/sync-core/src/lib/diff.ts",
+            "packages/sync-core/src/lib/server-types.ts",
+            "packages/sync/src/index.ts",
+            "packages/sync/src/useSyncDemo.ts",
+            "packages/tldraw/src/lib/Tldraw.tsx",
+            "packages/tldraw/src/lib/shapes/arrow/ArrowShapeTool.ts",
+            "packages/tldraw/src/lib/shapes/arrow/elbow/routes/ElbowArrowWorkingInfo.ts",
+            "packages/tldraw/src/lib/shapes/draw/DrawShapeTool.ts",
+            "packages/tldraw/src/lib/shapes/frame/FrameShapeTool.ts",
+            "packages/tldraw/src/lib/shapes/geo/GeoShapeTool.ts",
+            "packages/tldraw/src/lib/shapes/geo/GeoShapeUtil.tsx",
+            "packages/tldraw/src/lib/shapes/line/LineShapeTool.ts",
+            "packages/tldraw/src/lib/shapes/line/LineShapeUtil.tsx",
+            "packages/tldraw/src/lib/shapes/note/NoteShapeTool.ts",
+            "packages/tldraw/src/lib/shapes/shared/PathBuilder.tsx",
+            "packages/tldraw/src/lib/shapes/text/TextShapeTool.ts",
+            "packages/tldraw/src/lib/utils/embeds/embeds.ts",
+            "packages/tldraw/src/lib/utils/text/text.ts",
+            "packages/tldraw/src/lib/utils/tldr/buildFromV1Document.ts",
+            "packages/tldraw/src/test/TestEditor.ts",
+            "packages/tlschema/src/TLStore.ts",
+            "packages/tlschema/src/createPresenceStateDerivation.ts",
+            "packages/tlschema/src/createTLSchema.ts",
+            "packages/tlschema/src/misc/TLRichText.ts",
+            "packages/tlschema/src/misc/b64Vecs.ts",
+            "packages/tlschema/src/recordsWithProps.ts",
+            "packages/tlschema/src/store-migrations.ts",
+            "packages/tlschema/src/translations/translations.ts",
+            "packages/utils/src/lib/ExecutionQueue.ts",
+            "packages/utils/src/lib/PerformanceTracker.ts",
+            "packages/utils/src/lib/array.ts",
+            "packages/utils/src/lib/bind.ts",
+            "packages/utils/src/lib/cache.ts",
+            "packages/utils/src/lib/control.ts",
+            "packages/utils/src/lib/debounce.ts",
+            "packages/utils/src/lib/error.ts",
+            "packages/utils/src/lib/file.ts",
+            "packages/utils/src/lib/hash.ts",
+            "packages/utils/src/lib/id.ts",
+            "packages/utils/src/lib/iterable.ts",
+            "packages/utils/src/lib/media/apng.ts",
+            "packages/utils/src/lib/media/avif.ts",
+            "packages/utils/src/lib/media/gif.ts",
+            "packages/utils/src/lib/media/media.ts",
+            "packages/utils/src/lib/media/webp.ts",
+            "packages/utils/src/lib/network.ts",
+            "packages/utils/src/lib/number.ts",
+            "packages/utils/src/lib/object.ts",
+            "packages/utils/src/lib/reordering.ts",
+            "packages/utils/src/lib/retry.ts",
+            "packages/utils/src/lib/sort.ts",
+            "packages/utils/src/lib/throttle.ts",
+            "packages/utils/src/lib/timers.ts",
+            "packages/utils/src/lib/url.ts",
+            "packages/utils/src/lib/value.ts",
+            "packages/utils/src/lib/version.ts",
+            "packages/utils/src/lib/warn.ts",
+            "packages/validate/src/lib/validation.ts",
+            "packages/worker-shared/src/bookmarks.ts",
+            "packages/worker-shared/src/index.ts",
+            "packages/worker-shared/src/sentry.ts",
+        }
+
+        entities = super().extract_entities(
+            dirs_exclude=dirs_exclude,
+            dirs_include=["apps", "packages"],
+            exclude_tests=exclude_tests,
+            max_entities=max_entities,
+        )
+        return [
+            entity
+            for entity in entities
+            if any(entity.file_path.replace("\\", "/").endswith(path) for path in allow)
+        ]
 
 
 @dataclass
