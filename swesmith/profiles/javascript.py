@@ -7,6 +7,155 @@ from swesmith.profiles.base import RepoProfile, registry
 from swesmith.profiles.utils import X11_DEPS
 from unidiff import PatchSet
 
+ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+SUMMARY_TEST_CAP = 64
+
+
+def _strip_ansi(log: str) -> str:
+    return ANSI_ESCAPE_RE.sub("", log)
+
+
+def _extract_count(text: str, token: str) -> int:
+    match = re.search(rf"(\d+)\s+{token}\b", text, re.IGNORECASE)
+    return int(match.group(1)) if match else 0
+
+
+def _extract_summary_counts(log: str) -> tuple[int, int, int]:
+    """
+    Extract pass/fail/skip counts from summary-style output when per-test lines are absent.
+    """
+    best_counts = (0, 0, 0)
+    best_total = 0
+
+    for raw_line in log.split("\n"):
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        has_summary_marker = any(
+            marker in line
+            for marker in [
+                "Tests:",
+                "Test Files",
+                "Test Suites:",
+                "passing",
+                "test result:",
+                "TOTAL:",
+                "SUCCESS",
+                "successful",
+                " pass",
+                " fail",
+                "Ran ",
+            ]
+        )
+        if not has_summary_marker:
+            continue
+
+        passed = _extract_count(line, "passed")
+        failed = _extract_count(line, "failed")
+        skipped = _extract_count(line, "skipped") + _extract_count(
+            line, "pending"
+        ) + _extract_count(line, "todo")
+
+        # Mocha-style summary lines
+        if passed == 0 and failed == 0 and skipped == 0:
+            passed = _extract_count(line, "passing")
+            failed = _extract_count(line, "failing")
+            skipped = _extract_count(line, "pending")
+
+        total = passed + failed + skipped
+        if total > best_total:
+            best_counts = (passed, failed, skipped)
+            best_total = total
+
+    # Bun/other summary styles:
+    # "41 pass | 0 fail" and "Ran 41 tests across 3 files."
+    if best_total == 0:
+        passed = _extract_count(log, "pass")
+        failed = _extract_count(log, "fail")
+        if passed + failed > 0:
+            return (passed, failed, 0)
+
+    # Karma-like line:
+    # "TOTAL: 214 SUCCESS"
+    if best_total == 0:
+        success_match = re.search(r"TOTAL:\s*(\d+)\s+SUCCESS", log, re.IGNORECASE)
+        if success_match:
+            return (int(success_match.group(1)), 0, 0)
+
+    # Generic successful-task summary:
+    # "Tasks: 3 successful, 3 total"
+    if best_total == 0:
+        successful_match = re.search(
+            r"Tasks:\s*(\d+)\s+successful", log, re.IGNORECASE
+        )
+        if successful_match:
+            return (int(successful_match.group(1)), 0, 0)
+
+    return best_counts
+
+
+def _scaled_summary_slots(
+    passed: int, failed: int, skipped: int, cap: int = SUMMARY_TEST_CAP
+) -> tuple[int, int, int]:
+    total = passed + failed + skipped
+    if total <= cap:
+        return passed, failed, skipped
+
+    p = int(cap * passed / total) if passed else 0
+    f = int(cap * failed / total) if failed else 0
+    s = int(cap * skipped / total) if skipped else 0
+
+    if passed > 0 and p == 0:
+        p = 1
+    if failed > 0 and f == 0:
+        f = 1
+    if skipped > 0 and s == 0:
+        s = 1
+
+    while p + f + s > cap:
+        if p >= f and p >= s and p > 1:
+            p -= 1
+        elif f >= s and f > 1:
+            f -= 1
+        elif s > 1:
+            s -= 1
+        else:
+            break
+
+    while p + f + s < cap:
+        if passed > p:
+            p += 1
+        elif failed > f:
+            f += 1
+        elif skipped > s:
+            s += 1
+        else:
+            break
+
+    return p, f, s
+
+
+def _add_summary_tests(
+    test_status_map: dict[str, str], prefix: str, passed: int, failed: int, skipped: int
+):
+    if test_status_map:
+        return
+
+    passed_slots, failed_slots, skipped_slots = _scaled_summary_slots(
+        passed, failed, skipped
+    )
+    idx = 1
+    for _ in range(passed_slots):
+        test_status_map[f"{prefix}_summary_{idx}"] = TestStatus.PASSED.value
+        idx += 1
+    for _ in range(failed_slots):
+        test_status_map[f"{prefix}_summary_{idx}"] = TestStatus.FAILED.value
+        idx += 1
+    for _ in range(skipped_slots):
+        test_status_map[f"{prefix}_summary_{idx}"] = TestStatus.SKIPPED.value
+        idx += 1
+
 
 @dataclass
 class JavaScriptProfile(RepoProfile):
@@ -70,11 +219,14 @@ def parse_log_jest(log: str) -> dict[str, str]:
         dict: test case to test status mapping
     """
     test_status_map = {}
+    clean_log = _strip_ansi(log)
 
     pattern = r"^\s*(✓|✕|○)\s(.+?)(?:\s\((\d+\s*m?s)\))?$"
+    suite_pattern = r"^\s*(PASS|FAIL)\s+(.+?)$"
 
-    for line in log.split("\n"):
-        match = re.match(pattern, line.strip())
+    for line in clean_log.split("\n"):
+        stripped = line.strip()
+        match = re.match(pattern, stripped)
         if match:
             status_symbol, test_name, _duration = match.groups()
             if status_symbol == "✓":
@@ -83,18 +235,34 @@ def parse_log_jest(log: str) -> dict[str, str]:
                 test_status_map[test_name] = TestStatus.FAILED.value
             elif status_symbol == "○":
                 test_status_map[test_name] = TestStatus.SKIPPED.value
+
+        suite_match = re.match(suite_pattern, stripped)
+        if suite_match:
+            suite_status, suite_name = suite_match.groups()
+            test_status_map[f"suite::{suite_name}"] = (
+                TestStatus.PASSED.value
+                if suite_status == "PASS"
+                else TestStatus.FAILED.value
+            )
+
+    if not test_status_map:
+        passed, failed, skipped = _extract_summary_counts(clean_log)
+        _add_summary_tests(test_status_map, "jest", passed, failed, skipped)
+
     return test_status_map
 
 
 def parse_log_mocha(log: str) -> dict[str, str]:
     test_status_map = {}
+    clean_log = _strip_ansi(log)
     # Pattern for checkmark/x/dash style output
     # Note: Match both ✓ (U+2713) and ✔ (U+2714) checkmarks as different Mocha versions use different symbols
     pattern = r"^\s*([✓✔]|✖|-)\s(.+?)(?:\s\((\d+\s*m?s)\))?$"
     # Pattern for numbered failures like "1) test name" or "1) should solve..."
     fail_pattern = r"^\s*\d+\)\s+(.+?)(?:\s\((\d+\s*m?s)\))?$"
-    for line in log.split("\n"):
-        match = re.match(pattern, line.strip())
+    for line in clean_log.split("\n"):
+        stripped = line.strip()
+        match = re.match(pattern, stripped)
         if match:
             status_symbol, test_name, _duration = match.groups()
             if status_symbol in ("✓", "✔"):
@@ -105,15 +273,21 @@ def parse_log_mocha(log: str) -> dict[str, str]:
                 test_status_map[test_name] = TestStatus.SKIPPED.value
         else:
             # Try numbered failure pattern
-            fail_match = re.match(fail_pattern, line.strip())
+            fail_match = re.match(fail_pattern, stripped)
             if fail_match:
                 test_name = fail_match.group(1)
                 test_status_map[test_name] = TestStatus.FAILED.value
+
+    if not test_status_map:
+        passed, failed, skipped = _extract_summary_counts(clean_log)
+        _add_summary_tests(test_status_map, "mocha", passed, failed, skipped)
+
     return test_status_map
 
 
 def parse_log_vitest(log: str) -> dict[str, str]:
     test_status_map = {}
+    clean_log = _strip_ansi(log)
     patterns = [
         # Vitest uses ✓ for passing test files and ❯ for test files with failures
         (r"^✓\s+(.+?)(?:\s+\([\.\d]+ms\))?$", TestStatus.PASSED.value),
@@ -124,7 +298,7 @@ def parse_log_vitest(log: str) -> dict[str, str]:
         (r"^✗\s+(.+?)$", TestStatus.FAILED.value),
         (r"^○\s+(.+?)$", TestStatus.SKIPPED.value),
     ]
-    for line in log.split("\n"):
+    for line in clean_log.split("\n"):
         for pattern, status in patterns:
             match = re.match(pattern, line.strip())
             if match:
@@ -136,6 +310,10 @@ def parse_log_vitest(log: str) -> dict[str, str]:
                     test_name = test_name.split("(")[0].strip()
                 test_status_map[test_name] = status
                 break
+
+    if not test_status_map:
+        passed, failed, skipped = _extract_summary_counts(clean_log)
+        _add_summary_tests(test_status_map, "vitest", passed, failed, skipped)
 
     return test_status_map
 
@@ -190,10 +368,12 @@ def parse_log_jasmine(log: str) -> dict[str, str]:
     """
     test_status_map = {}
 
+    clean_log = _strip_ansi(log)
+
     # Pattern for Jasmine summary: "X specs, Y failures, Z pending specs"
     pattern = r"(\d+)\s+specs?,\s+(\d+)\s+failures?(?:,\s+(\d+)\s+pending\s+specs?)?"
 
-    for line in log.split("\n"):
+    for line in clean_log.split("\n"):
         match = re.search(pattern, line)
         if match:
             total_specs = int(match.group(1))
@@ -217,6 +397,10 @@ def parse_log_jasmine(log: str) -> dict[str, str]:
                 )
 
             break  # Only process the first summary line
+
+    if not test_status_map:
+        passed, failed, skipped = _extract_summary_counts(clean_log)
+        _add_summary_tests(test_status_map, "jasmine", passed, failed, skipped)
 
     return test_status_map
 
